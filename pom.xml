@@ -1,0 +1,107 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>de.mhus.vance.ode</groupId>
+    <artifactId>vance-ode</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <name>vance-ode</name>
+    <description>Spring Boot library that connects foreign software to Vancetope. One module per Vancetope subsystem the application takes part in — a consumer depends on the contracts it uses and inherits nothing else.</description>
+    <packaging>pom</packaging>
+
+    <modules>
+        <module>vance-ode-core</module>
+        <module>vance-ode-ursa</module>
+    </modules>
+
+    <properties>
+        <!--
+            Java 21, not 25 as in vance and hrafnagud. This is a library
+            meant to be embedded in software we do not control, and the
+            current LTS is the floor a consumer can be expected to meet.
+            Nothing here needs a newer language level.
+        -->
+        <maven.compiler.release>21</maven.compiler.release>
+        <spring.boot.version>4.1.0</spring.boot.version>
+        <lombok.version>1.18.46</lombok.version>
+        <jspecify.version>1.0.1</jspecify.version>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!--
+                BOM import rather than inheriting spring-boot-starter-parent.
+                A library should not push a parent onto the poms that consume
+                it; importing the BOM pins our own dependency versions without
+                reaching into anyone else's build.
+            -->
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-dependencies</artifactId>
+                <version>${spring.boot.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.jspecify</groupId>
+                <artifactId>jspecify</artifactId>
+                <version>${jspecify.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <version>${lombok.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.jspecify</groupId>
+            <artifactId>jspecify</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>dependency-jar-properties</id>
+                        <goals>
+                            <goal>properties</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- Mockito's inline mock-maker needs the agent passed at
+                         JVM start; self-attaching is deprecated for removal. -->
+                    <argLine>-javaagent:${org.mockito:mockito-core:jar}</argLine>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>
