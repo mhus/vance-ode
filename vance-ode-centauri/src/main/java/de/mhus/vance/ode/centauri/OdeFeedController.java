@@ -15,6 +15,7 @@
  */
 package de.mhus.vance.ode.centauri;
 
+import de.mhus.vance.ode.inbound.OdeCaller;
 import de.mhus.vance.ode.inbound.OdeErrorResponse;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -32,6 +33,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -98,7 +100,9 @@ public class OdeFeedController {
             @RequestParam(required = false) @Nullable List<String> languages,
             @RequestParam(required = false) @Nullable String since,
             @RequestHeader(name = OdeFeedHeaders.READER, required = false)
-            @Nullable String reader) {
+            @Nullable String reader,
+            @RequestAttribute(name = OdeCaller.ATTRIBUTE, required = false)
+            @Nullable OdeCaller caller) {
 
         OdeCapabilities caps = source.capabilities();
         if (direction == OdeDirection.NEWER && !caps.supportsNewerDirection()) {
@@ -120,7 +124,8 @@ public class OdeFeedController {
                 caps.pushdownTextSearch() ? text : null,
                 caps.pushdownLanguage() ? normalizeLanguages(languages) : Set.of(),
                 caps.pushdownSince() ? parseSince(since) : null,
-                reader);
+                reader,
+                caller);
 
         OdeItemPage page = source.items(query);
         warnIfOutOfOrder(page, direction);
@@ -136,8 +141,10 @@ public class OdeFeedController {
     public ResponseEntity<OdeItemBody> item(
             @PathVariable String itemId,
             @RequestHeader(name = OdeFeedHeaders.READER, required = false)
-            @Nullable String reader) {
-        return source.body(itemId, reader)
+            @Nullable String reader,
+            @RequestAttribute(name = OdeCaller.ATTRIBUTE, required = false)
+            @Nullable OdeCaller caller) {
+        return source.body(itemId, reader, caller)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
@@ -154,7 +161,9 @@ public class OdeFeedController {
     public ResponseEntity<OdeSignalResponse> signal(
             @RequestBody OdeSignalRequest request,
             @RequestHeader(name = OdeFeedHeaders.READER, required = false)
-            @Nullable String reader) {
+            @Nullable String reader,
+            @RequestAttribute(name = OdeCaller.ATTRIBUTE, required = false)
+            @Nullable OdeCaller caller) {
 
         OdeCapabilities caps = source.capabilities();
         if (!caps.signalsAccepted().contains(request.signal())) {
@@ -163,7 +172,7 @@ public class OdeFeedController {
                             "this source does not accept " + request.signal()));
         }
 
-        OdeSignalResponse response = source.signal(request.withReader(reader));
+        OdeSignalResponse response = source.signal(request.withReader(reader), caller);
         HttpStatus status = switch (response.outcome()) {
             case ACCEPTED -> HttpStatus.ACCEPTED;
             case UNSUPPORTED -> HttpStatus.NOT_IMPLEMENTED;

@@ -15,6 +15,7 @@
  */
 package de.mhus.vance.ode.inbound;
 
+import org.jspecify.annotations.Nullable;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
@@ -30,18 +31,34 @@ public final class OdeInboundSecurity {
         /* factory only */
     }
 
+    /** Guards on the configured shared secret, if one is set. */
     public static WebMvcConfigurer guarding(OdeInboundEndpoint endpoint) {
+        return guarding(endpoint, null);
+    }
+
+    /**
+     * Guards on the application's own {@link OdeAuthService} when it published
+     * one, on the configured shared secret otherwise.
+     *
+     * <p>Note which of the two decides whether the guard is registered at all:
+     * an auth service secures the path <b>regardless</b> of {@code api-key}. An
+     * application that took the trouble to write a validator has said what it
+     * wants, and reading an unset property as "leave it open" would be the one
+     * failure mode that opens access rather than closing it.
+     */
+    public static WebMvcConfigurer guarding(
+            OdeInboundEndpoint endpoint, @Nullable OdeAuthService authService) {
         return new WebMvcConfigurer() {
             @Override
             public void addInterceptors(InterceptorRegistry registry) {
-                if (!endpoint.isSecured()) {
+                if (authService == null && !endpoint.isSecured()) {
                     return;
                 }
                 // normalisedPath(), never getPath(): a configured trailing slash
                 // would otherwise build "/ode/feed//**", which matches nothing
                 // while the endpoints stay mapped — a guard that fails open.
                 String base = endpoint.normalisedPath();
-                registry.addInterceptor(new OdeApiKeyInterceptor(endpoint))
+                registry.addInterceptor(new OdeAuthInterceptor(endpoint, authService))
                         .addPathPatterns(base, base + "/**");
             }
         };

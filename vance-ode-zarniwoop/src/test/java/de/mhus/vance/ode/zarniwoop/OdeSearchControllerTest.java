@@ -23,11 +23,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import de.mhus.vance.ode.inbound.OdeApiKeyInterceptor;
+import de.mhus.vance.ode.inbound.OdeAuthDecision;
+import de.mhus.vance.ode.inbound.OdeAuthInterceptor;
+import de.mhus.vance.ode.inbound.OdeAuthService;
+import de.mhus.vance.ode.inbound.OdeCaller;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -60,7 +64,7 @@ class OdeSearchControllerTest {
                 .standaloneSetup(new OdeSearchController(source, properties))
                 .addPlaceholderValue("vance.ode.zarniwoop.path", PATH);
         if (properties.isSecured()) {
-            builder = builder.addInterceptors(new OdeApiKeyInterceptor(properties));
+            builder = builder.addInterceptors(new OdeAuthInterceptor(properties));
         }
         return builder.build();
     }
@@ -120,6 +124,37 @@ class OdeSearchControllerTest {
             assertThat(q.maxResults()).isEqualTo(5);
             assertThat(q.tier()).isEqualTo(OdeSearchTier.NORMAL);
         });
+    }
+
+    /**
+     * What the guard decided has to arrive at the source, or authenticating is
+     * only a doorman: the source cannot narrow what it serves to a caller it is
+     * never told about.
+     */
+    @Test
+    void search_carriesTheAuthenticatedCallerToTheSource() throws Exception {
+        mvc.perform(post(PATH + "/search")
+                        .requestAttr(OdeCaller.ATTRIBUTE, OdeCaller.of("acme"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"query":"tariffs","modality":"NEWS"}"""))
+                .andExpect(status().isOk());
+
+        assertThat(source.received()).singleElement().satisfies(q ->
+                assertThat(q.caller()).isNotNull().extracting(OdeCaller::id).isEqualTo("acme"));
+    }
+
+    /** No auth service, no caller — and a source must cope with that. */
+    @Test
+    void search_withoutAGuard_hasNoCaller() throws Exception {
+        mvc.perform(post(PATH + "/search")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"query":"tariffs","modality":"NEWS"}"""))
+                .andExpect(status().isOk());
+
+        assertThat(source.received()).singleElement()
+                .satisfies(q -> assertThat(q.caller()).isNull());
     }
 
     @Test
@@ -351,6 +386,22 @@ class OdeSearchControllerTest {
                 .andExpect(status().isNotFound());
     }
 
+    /**
+     * A stash id is guessable enough that finding one is not an entitlement, so
+     * the fetch is told who is asking as well.
+     */
+    @Test
+    void content_carriesTheAuthenticatedCallerToTheSource() throws Exception {
+        var licensed = new LicensedContentSource();
+        mvc = mvc(licensed, properties);
+
+        mvc.perform(get(PATH + "/content/c1")
+                        .requestAttr(OdeCaller.ATTRIBUTE, OdeCaller.of("acme")))
+                .andExpect(status().isOk());
+
+        assertThat(licensed.callerId).isEqualTo("acme");
+    }
+
     // ── the shared guard, on this path ───────────────────────────────
 
     @Test
@@ -392,5 +443,75 @@ class OdeSearchControllerTest {
                 .andExpect(status().isUnauthorized());
 
         assertThat(source.received()).isEmpty();
+    }
+
+    /** The whole chain: token in, decision, caller on the query the source runs. */
+    @Test
+    void anAuthServiceGuardsThePathAndNamesTheCaller() throws Exception {
+        mvc = mvcWithAuth(source, properties);
+
+        mvc.perform(post(PATH + "/search")
+                        .header("Authorization", "Bearer t-acme")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"query":"x","modality":"NEWS"}"""))
+                .andExpect(status().isOk());
+
+        assertThat(source.received()).singleElement().satisfies(q ->
+                assertThat(q.caller()).isNotNull().extracting(OdeCaller::id).isEqualTo("acme"));
+    }
+
+    /** And the endpoint is guarded although no api-key was ever configured. */
+    @Test
+    void anAuthServiceGuardsThePathWithoutAConfiguredApiKey() throws Exception {
+        assertThat(properties.isSecured()).isFalse();
+        mvc = mvcWithAuth(source, properties);
+
+        mvc.perform(post(PATH + "/search")
+                        .header("Authorization", "Bearer t-somebody-else")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"query":"x","modality":"NEWS"}"""))
+                .andExpect(status().isUnauthorized());
+
+        assertThat(source.received()).isEmpty();
+    }
+
+    private static MockMvc mvcWithAuth(
+            SearchSource source, VanceOdeZarniwoopProperties properties) {
+        OdeAuthService auth = (token, path) -> "t-acme".equals(token)
+                ? OdeAuthDecision.allow(OdeCaller.of("acme"))
+                : OdeAuthDecision.unauthenticated();
+        return MockMvcBuilders
+                .standaloneSetup(new OdeSearchController(source, properties))
+                .addPlaceholderValue("vance.ode.zarniwoop.path", PATH)
+                .addInterceptors(new OdeAuthInterceptor(properties, auth))
+                .build();
+    }
+
+    /** A source that serves bodies only to the caller that licensed them. */
+    private static final class LicensedContentSource implements SearchSource {
+
+        private @Nullable String callerId;
+
+        @Override
+        public OdeSearchCapabilities capabilities() {
+            return new OdeSearchCapabilities(
+                    Set.of(OdeSearchModality.PDF), Set.of(OdeSearchDomain.INTERNAL),
+                    Set.of(OdeSearchTier.NORMAL), 10, Set.of(), true, null);
+        }
+
+        @Override
+        public OdeSearchResponse search(OdeSearchQuery query) {
+            return OdeSearchResponse.of(List.of());
+        }
+
+        @Override
+        public java.util.Optional<OdeContentBody> content(
+                String contentId, @Nullable OdeCaller caller) {
+            this.callerId = caller == null ? null : caller.id();
+            return java.util.Optional.of(
+                    new OdeContentBody("application/pdf", new byte[]{1, 2, 3}));
+        }
     }
 }

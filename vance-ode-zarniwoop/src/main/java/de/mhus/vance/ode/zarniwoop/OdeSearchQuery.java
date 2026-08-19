@@ -15,6 +15,8 @@
  */
 package de.mhus.vance.ode.zarniwoop;
 
+import de.mhus.vance.ode.inbound.OdeAuthService;
+import de.mhus.vance.ode.inbound.OdeCaller;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
@@ -44,6 +46,13 @@ import org.jspecify.annotations.Nullable;
  *                     untouched. Unknown keys should be ignored, not refused:
  *                     the caller cannot know this source's schema and a refusal
  *                     costs the whole query.
+ * @param caller       whose token got this request in, when an
+ *                     {@link OdeAuthService} named it — a customer or a
+ *                     contract, <b>never a person</b>. Null on an endpoint
+ *                     without one. Narrow what you search by it if your
+ *                     licensing says so; do not use it to reorder results, and
+ *                     do not let {@code capabilities()} depend on it, which
+ *                     both ends cache.
  */
 public record OdeSearchQuery(
         String query,
@@ -51,7 +60,8 @@ public record OdeSearchQuery(
         OdeSearchTier tier,
         int maxResults,
         @Nullable String locale,
-        Map<String, Object> expertParams) {
+        Map<String, Object> expertParams,
+        @Nullable OdeCaller caller) {
 
     public OdeSearchQuery {
         if (query == null || query.isBlank()) {

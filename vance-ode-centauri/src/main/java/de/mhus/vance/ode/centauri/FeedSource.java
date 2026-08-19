@@ -15,6 +15,7 @@
  */
 package de.mhus.vance.ode.centauri;
 
+import de.mhus.vance.ode.inbound.OdeCaller;
 import java.util.List;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
@@ -96,6 +97,19 @@ public interface FeedSource {
     }
 
     /**
+     * The same fetch, told whose token asked for it.
+     *
+     * <p>This is the one the endpoint calls; the default drops the caller and
+     * delegates, so a source that does not care implements
+     * {@link #body(String, String)} and never sees this. Override it when a full
+     * text is licensed rather than public.
+     */
+    default Optional<OdeItemBody> body(
+            String itemId, @Nullable String reader, @Nullable OdeCaller caller) {
+        return body(itemId, reader);
+    }
+
+    /**
      * Take a back-channel signal. Only called for signals you listed in
      * {@link OdeCapabilities#signalsAccepted()}, so the default refusal is
      * reached only if the two disagree.
@@ -106,5 +120,17 @@ public interface FeedSource {
      */
     default OdeSignalResponse signal(OdeSignalRequest request) {
         return OdeSignalResponse.of(OdeSignalOutcome.UNSUPPORTED);
+    }
+
+    /**
+     * The same signal, told whose token sent it.
+     *
+     * <p>This is the one the endpoint calls; the default drops the caller and
+     * delegates. Worth overriding for a source that acts on reports, where
+     * knowing which installation reported something is the difference between a
+     * queue you can work and one you cannot trust.
+     */
+    default OdeSignalResponse signal(OdeSignalRequest request, @Nullable OdeCaller caller) {
+        return signal(request);
     }
 }

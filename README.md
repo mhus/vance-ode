@@ -253,6 +253,9 @@ a library insisting on a second scheme it invented would be fighting its host.
 Set it when the endpoint would otherwise be reachable by anyone; it is then
 expected as `Authorization: Bearer <key>` and compared in constant time.
 
+For more than one reader — several tokens, rotation, revocation, or knowing
+*which* installation is calling — see [Who may call](#who-may-call).
+
 ## Zarniwoop — being searched
 
 The inbound direction again, and a different act. Centauri asks for entries in
@@ -359,6 +362,80 @@ fails deserialisation when the JSON field for a primitive is missing, and it doe
 so **before any handler runs** — the caller gets a bodiless 400 for a field the
 contract calls optional, with nothing to read. Anything optional added to an
 inbound body later follows the same rule.
+
+## Who may call
+
+Both inbound modules take the same bearer token, and there are two ways to
+decide whether it is good.
+
+**One shared secret** (`api-key`, above) is enough for a source serving one
+reader. It is not enough for anything else: it cannot be rotated without
+downtime, cannot be revoked for one reader out of ten, and tells the source
+nothing about who called.
+
+**Your own validator** is the other way. Publish an `OdeAuthService` bean and
+every Ode endpoint in the application authenticates through it:
+
+```java
+@Component
+class TokenAuth implements OdeAuthService {
+
+    @Override
+    public OdeAuthDecision authenticate(String token, String endpointPath) {
+        return subscriptions.find(token)
+                .map(s -> s.active()
+                        ? OdeAuthDecision.allow(
+                                OdeCaller.of(s.customerId(), Map.of("plan", s.plan())))
+                        : OdeAuthDecision.forbidden("subscription lapsed"))
+                .orElseGet(OdeAuthDecision::unauthenticated);
+    }
+}
+```
+
+The token stays **opaque** to this contract — a row in a table, a JWT, a licence
+key checked against a billing system. That is the point: an application that
+already knows who its customers are uses that answer instead of learning a
+second scheme.
+
+Four rules the guard applies around it:
+
+- **The service replaces the static comparison, it does not join it.** With the
+  bean present, `api-key` is not consulted at all. Two parallel definitions of
+  "valid" is the kind of thing that cannot be removed a year later, and the one
+  that wins in an emergency is never the one you remember. The guard logs a
+  warning if both are configured.
+- **A request without a bearer header is refused before the service is
+  called.** Deciding that no token at all is acceptable is a decision about
+  whether the endpoint is public, and it is made by publishing the bean or not.
+- **An exception is a refusal, never a pass.** A validator whose store is
+  unreachable fails closed and the caller retries.
+- **A service secures the path regardless of `api-key`.** Reading an unset
+  property as "leave it open" would be the one failure mode that opens access
+  rather than closing it.
+
+`UNAUTHENTICATED` becomes a 401 and `FORBIDDEN` a 403 — different problems for
+whoever has to fix them, and only the source can tell them apart. Neither
+carries a body: the party being refused is the last one that should be told
+which half of its credential was wrong.
+
+### What the caller reaches
+
+An allowed decision names an `OdeCaller`, and it arrives where the work happens
+— `OdeSearchQuery.caller()`, `OdeItemQuery.caller()`, and as a parameter on the
+on-demand fetches (`SearchSource.content(id, caller)`,
+`FeedSource.body(id, reader, caller)`, `FeedSource.signal(request, caller)`,
+each defaulting to the variant without it). Without that step, authenticating
+would only be a doorman: a source cannot narrow what it serves to a caller it is
+never told about.
+
+Two boundaries hold:
+
+- **`OdeCaller` is an installation, never a person.** It names the deployment
+  whose token got in — a customer, a contract. Centauri's reader pseudonym is
+  the other half of that distinction and stays separate: authorise with the
+  caller, personalise with the pseudonym.
+- **`capabilities()` must not depend on it.** Both ends cache that answer. Serve
+  a caller fewer results, not a different declaration.
 
 ## Errors
 

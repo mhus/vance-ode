@@ -15,6 +15,7 @@
  */
 package de.mhus.vance.ode.zarniwoop;
 
+import de.mhus.vance.ode.inbound.OdeCaller;
 import de.mhus.vance.ode.inbound.OdeErrorResponse;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +28,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -85,7 +87,10 @@ public class OdeSearchController {
      * source does not have.
      */
     @PostMapping("/search")
-    public OdeSearchResponse search(@RequestBody OdeSearchRequestBody body) {
+    public OdeSearchResponse search(
+            @RequestBody OdeSearchRequestBody body,
+            @RequestAttribute(name = OdeCaller.ATTRIBUTE, required = false)
+            @Nullable OdeCaller caller) {
         OdeSearchCapabilities caps = source.capabilities();
 
         OdeSearchModality modality = body.modality();
@@ -116,7 +121,8 @@ public class OdeSearchController {
                 tier,
                 clampMaxResults(body.maxResults(), caps),
                 body.locale(),
-                expertParams);
+                expertParams,
+                caller);
 
         OdeSearchResponse response = source.search(query);
         warnIfOverLimit(response, query);
@@ -134,11 +140,14 @@ public class OdeSearchController {
      * informative version of the same 404.
      */
     @GetMapping("/content/{contentId}")
-    public ResponseEntity<byte[]> content(@PathVariable String contentId) {
+    public ResponseEntity<byte[]> content(
+            @PathVariable String contentId,
+            @RequestAttribute(name = OdeCaller.ATTRIBUTE, required = false)
+            @Nullable OdeCaller caller) {
         if (!source.capabilities().servesContent()) {
             return ResponseEntity.notFound().build();
         }
-        return source.content(contentId)
+        return source.content(contentId, caller)
                 .map(body -> ResponseEntity.ok()
                         .contentType(MediaType.parseMediaType(body.mimeType()))
                         .body(body.bytes()))

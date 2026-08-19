@@ -15,6 +15,8 @@
  */
 package de.mhus.vance.ode.centauri;
 
+import de.mhus.vance.ode.inbound.OdeAuthService;
+import de.mhus.vance.ode.inbound.OdeCaller;
 import java.time.Instant;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
@@ -34,6 +36,14 @@ import org.jspecify.annotations.Nullable;
  * respond breaks them. Use it, if you want, to personalise selection or keep
  * read marks — but never to authorise, and never as an identifier of a human.
  * It is salted per source, so it is meaningless anywhere but here.
+ *
+ * <p><b>{@code caller} is the other half of that distinction and must not be
+ * confused with it.</b> It names the installation whose token got the request
+ * in — a customer, a contract — and is set when an {@link OdeAuthService}
+ * decided, null otherwise. Authorise with it; personalise with {@code reader}.
+ * The one thing it must not touch is the <i>order</i> of the page: the reader
+ * merges your entries with other sources on the timestamp, and per-caller
+ * ranking produces a quietly wrong sequence rather than a visible error.
  */
 public record OdeItemQuery(
         String selector,
@@ -43,7 +53,8 @@ public record OdeItemQuery(
         @Nullable String text,
         Set<String> languages,
         @Nullable Instant since,
-        @Nullable String reader) {
+        @Nullable String reader,
+        @Nullable OdeCaller caller) {
 
     public OdeItemQuery {
         selector = selector == null ? "" : selector.trim();

@@ -22,7 +22,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import de.mhus.vance.ode.inbound.OdeApiKeyInterceptor;
+import de.mhus.vance.ode.inbound.OdeAuthDecision;
+import de.mhus.vance.ode.inbound.OdeAuthInterceptor;
+import de.mhus.vance.ode.inbound.OdeAuthService;
+import de.mhus.vance.ode.inbound.OdeCaller;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -61,7 +64,7 @@ class OdeFeedControllerTest {
                 .standaloneSetup(new OdeFeedController(source, properties))
                 .addPlaceholderValue("vance.ode.centauri.path", PATH);
         if (properties.isSecured()) {
-            builder = builder.addInterceptors(new OdeApiKeyInterceptor(properties));
+            builder = builder.addInterceptors(new OdeAuthInterceptor(properties));
         }
         return builder.build();
     }
@@ -291,6 +294,81 @@ class OdeFeedControllerTest {
         mvc.perform(get(PATH + "/items")).andExpect(status().isOk());
     }
 
+    // ── the authenticated caller ─────────────────────────────────────
+
+    /**
+     * The whole chain: token in, decision, caller on the query. Without this
+     * last step authenticating would only be a doorman — a source cannot narrow
+     * what it serves to a caller it is never told about.
+     */
+    @Test
+    void items_carryTheAuthenticatedCallerToTheSource() throws Exception {
+        mvcWithAuth(source, properties).perform(get(PATH + "/items")
+                        .header("Authorization", "Bearer t-acme")
+                        .header(OdeFeedHeaders.READER, "pseudo-42"))
+                .andExpect(status().isOk());
+
+        // Two different things, and they stay two: the installation that may
+        // read, and the opaque pseudonym of who is reading.
+        assertThat(source.lastQuery().caller()).isNotNull();
+        assertThat(source.lastQuery().caller().id()).isEqualTo("acme");
+        assertThat(source.lastQuery().reader()).isEqualTo("pseudo-42");
+    }
+
+    @Test
+    void items_withoutAGuard_haveNoCaller() throws Exception {
+        mvc.perform(get(PATH + "/items")).andExpect(status().isOk());
+
+        assertThat(source.lastQuery().caller()).isNull();
+    }
+
+    @Test
+    void anAuthServiceGuardsThePathWithoutAConfiguredApiKey() throws Exception {
+        assertThat(properties.isSecured()).isFalse();
+
+        mvcWithAuth(source, properties).perform(get(PATH + "/items")
+                        .header("Authorization", "Bearer t-somebody-else"))
+                .andExpect(status().isUnauthorized());
+
+        assertThat(source.calls()).isZero();
+    }
+
+    /**
+     * The two on-demand calls take the caller as a parameter rather than
+     * carrying it in a record. A source that does not care overrides neither
+     * and reaches the defaults — which is what every other test here does.
+     */
+    @Test
+    void item_andSignal_carryTheCallerToo() throws Exception {
+        var licensed = new CallerRecordingSource();
+        MockMvc guarded = mvcWithAuth(licensed, properties);
+
+        guarded.perform(get(PATH + "/item/i1")
+                        .header("Authorization", "Bearer t-acme"))
+                .andExpect(status().isOk());
+        assertThat(licensed.bodyCaller).isEqualTo("acme");
+
+        guarded.perform(post(PATH + "/signal")
+                        .header("Authorization", "Bearer t-acme")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"itemId":"i1","signal":"REPORT","reason":"SPAM"}"""))
+                .andExpect(status().isAccepted());
+        assertThat(licensed.signalCaller).isEqualTo("acme");
+    }
+
+    private static MockMvc mvcWithAuth(
+            FeedSource source, VanceOdeCentauriProperties properties) {
+        OdeAuthService auth = (token, path) -> "t-acme".equals(token)
+                ? OdeAuthDecision.allow(OdeCaller.of("acme"))
+                : OdeAuthDecision.unauthenticated();
+        return MockMvcBuilders
+                .standaloneSetup(new OdeFeedController(source, properties))
+                .addPlaceholderValue("vance.ode.centauri.path", PATH)
+                .addInterceptors(new OdeAuthInterceptor(properties, auth))
+                .build();
+    }
+
     // ── fake source ──────────────────────────────────────────────────
 
     /** Records what the controller handed over. */
@@ -371,6 +449,40 @@ class OdeFeedControllerTest {
             return refuse
                     ? new OdeSignalResponse(OdeSignalOutcome.REJECTED, "not plausible")
                     : OdeSignalResponse.of(OdeSignalOutcome.ACCEPTED);
+        }
+    }
+
+    /** Overrides the caller-aware variants, which the defaults otherwise hide. */
+    private static final class CallerRecordingSource implements FeedSource {
+
+        private @Nullable String bodyCaller;
+        private @Nullable String signalCaller;
+
+        @Override
+        public OdeCapabilities capabilities() {
+            return new OdeCapabilities(
+                    OdeSelectorMode.NONE, Set.of(),
+                    /* text */ false, /* language */ false, /* since */ false,
+                    /* newer */ false, /* fullBody */ false,
+                    50, Set.of(OdeSignal.REPORT), true, Duration.ofMinutes(30));
+        }
+
+        @Override
+        public OdeItemPage items(OdeItemQuery query) {
+            return new OdeItemPage(List.of(), null, false);
+        }
+
+        @Override
+        public Optional<OdeItemBody> body(
+                String itemId, @Nullable String reader, @Nullable OdeCaller caller) {
+            this.bodyCaller = caller == null ? null : caller.id();
+            return Optional.of(new OdeItemBody("full text of " + itemId));
+        }
+
+        @Override
+        public OdeSignalResponse signal(OdeSignalRequest request, @Nullable OdeCaller caller) {
+            this.signalCaller = caller == null ? null : caller.id();
+            return OdeSignalResponse.of(OdeSignalOutcome.ACCEPTED);
         }
     }
 }

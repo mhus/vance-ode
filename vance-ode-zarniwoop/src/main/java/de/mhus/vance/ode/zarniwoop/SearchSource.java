@@ -15,7 +15,9 @@
  */
 package de.mhus.vance.ode.zarniwoop;
 
+import de.mhus.vance.ode.inbound.OdeCaller;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The one interface an application implements to become a Vancetope research
@@ -77,5 +79,18 @@ public interface SearchSource {
      */
     default Optional<OdeContentBody> content(String contentId) {
         return Optional.empty();
+    }
+
+    /**
+     * The same fetch, told whose token asked for it.
+     *
+     * <p>This is the one the endpoint calls; the default drops the caller and
+     * delegates, so a source that does not care implements
+     * {@link #content(String)} and never sees this. Override it instead when a
+     * body is licensed rather than public — a stash id is guessable enough that
+     * "you found the id" is not an entitlement.
+     */
+    default Optional<OdeContentBody> content(String contentId, @Nullable OdeCaller caller) {
+        return content(contentId);
     }
 }

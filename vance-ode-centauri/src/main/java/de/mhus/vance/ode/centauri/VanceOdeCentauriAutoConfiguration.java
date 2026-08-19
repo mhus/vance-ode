@@ -15,7 +15,9 @@
  */
 package de.mhus.vance.ode.centauri;
 
+import de.mhus.vance.ode.inbound.OdeAuthService;
 import de.mhus.vance.ode.inbound.OdeInboundSecurity;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -52,14 +54,18 @@ public class VanceOdeCentauriAutoConfiguration {
     }
 
     /**
-     * Registers the shared-secret check on the configured path, and only when
-     * a secret is set. The guard itself is shared with every other inbound
-     * module ({@code de.mhus.vance.ode.inbound}) — an authentication check
-     * duplicated per endpoint drifts.
+     * Registers the token check on the configured path: against the
+     * application's {@link OdeAuthService} if it published one, against the
+     * configured shared secret otherwise, and not at all when there is neither.
+     * The guard itself is shared with every other inbound module
+     * ({@code de.mhus.vance.ode.inbound}) — an authentication check duplicated
+     * per endpoint drifts.
      */
     @Bean
     @ConditionalOnMissingBean(name = "odeFeedSecurityConfigurer")
-    public WebMvcConfigurer odeFeedSecurityConfigurer(VanceOdeCentauriProperties properties) {
-        return OdeInboundSecurity.guarding(properties);
+    public WebMvcConfigurer odeFeedSecurityConfigurer(
+            VanceOdeCentauriProperties properties,
+            ObjectProvider<OdeAuthService> authService) {
+        return OdeInboundSecurity.guarding(properties, authService.getIfAvailable());
     }
 }
