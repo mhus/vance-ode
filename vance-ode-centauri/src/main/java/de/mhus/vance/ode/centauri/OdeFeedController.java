@@ -15,6 +15,7 @@
  */
 package de.mhus.vance.ode.centauri;
 
+import de.mhus.vance.ode.inbound.OdeErrorResponse;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.LinkedHashSet;

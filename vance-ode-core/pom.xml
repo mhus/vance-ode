@@ -10,7 +10,7 @@
 
     <artifactId>vance-ode-core</artifactId>
     <name>vance-ode-core</name>
-    <description>Shared by both directions: connection configuration, error model, HTTP transport. Deliberately free of Spring Web so a consumer that only talks outbound does not inherit a servlet stack.</description>
+    <description>Shared by both directions: connection configuration, error model, HTTP transport, and the little that every inbound endpoint needs (shared-secret guard, error body). Its Spring Web dependencies are provided-scoped and therefore not transitive, so a consumer that only talks outbound still inherits no servlet stack. No controller lives here — that is what would break the promise.</description>
     <packaging>jar</packaging>
 
     <dependencies>
@@ -43,6 +43,33 @@
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
+        </dependency>
+
+        <!--
+            For de.mhus.vance.ode.inbound only, and both `provided`: the
+            shared-secret guard that every inbound module needs is a
+            HandlerInterceptor, so it cannot be written without these types.
+            Provided scope is not transitive, which is the whole point — an
+            application that only fires events downloads nothing from here and
+            the outbound-only case stays as lean as before. What must not move
+            in is a controller: that would drag a servlet container into it,
+            and then the promise really would be broken.
+
+            The alternative was one copy of the guard per inbound module. A
+            duplicated authentication check drifts, and the sibling repo made
+            the same call for the same reason (vance-shared carries one shared
+            filter base with provided-scoped Spring Web and nothing else
+            web-shaped).
+        -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-webmvc</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.servlet</groupId>
+            <artifactId>jakarta.servlet-api</artifactId>
+            <scope>provided</scope>
         </dependency>
 
         <dependency>

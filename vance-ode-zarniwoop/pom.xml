@@ -8,28 +8,31 @@
         <version>0.1.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>vance-ode-centauri</artifactId>
-    <name>vance-ode-centauri</name>
-    <description>Serves this application's time-ordered streams to Vancetope's Centauri feed reader. Implement one interface, get the REST contract. The only inbound module so far — Vancetope calls in, which is why this is the one module that needs Spring MVC.</description>
+    <artifactId>vance-ode-zarniwoop</artifactId>
+    <name>vance-ode-zarniwoop</name>
+    <description>Answers Vancetope research queries out of this application's own index. Implement one interface, get the REST contract. Inbound, like vance-ode-centauri, and independent of it — searching and being read are different acts.</description>
     <packaging>jar</packaging>
 
     <dependencies>
         <!--
             Core is here for de.mhus.vance.ode.inbound alone — the shared-secret
-            guard and the error body, which every inbound module needs and none
-            should own a second copy of.
-
-            Nothing outbound comes with it. Core's outbound auto-configuration
-            is conditional on `vance.ode.base-url`, so a feed source that sets
-            no brain URL gets no client, no transport and no token: the
-            dependency is on the classpath, not in the wiring. That is what the
-            earlier version of this comment was protecting, and it still holds.
+            guard and the error body. Nothing outbound comes with it: core's
+            auto-configuration is conditional on `vance.ode.base-url`, so a
+            search source that sets no brain URL gets no client and no transport.
         -->
         <dependency>
             <groupId>de.mhus.vance.ode</groupId>
             <artifactId>vance-ode-core</artifactId>
             <version>${project.version}</version>
         </dependency>
+
+        <!--
+            No dependency on vance-ode-centauri. The two modules share a shape,
+            not a contract: an application may implement both interfaces, and
+            many will, but a search index has no chronology to page through.
+            Coupling them would make every feed source carry a search endpoint
+            it does not serve.
+        -->
 
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -42,10 +45,10 @@
         </dependency>
 
         <!--
-            spring-webmvc rather than spring-boot-starter-web: the starter
-            picks a servlet container and a logging implementation, and an
-            application that already serves HTTP has made both choices. We
-            need the annotations and the handler mapping, nothing else.
+            spring-webmvc rather than spring-boot-starter-web: the starter picks
+            a servlet container and a logging implementation, and an application
+            that already serves HTTP has made both choices. We need the
+            annotations and the handler mapping, nothing else.
         -->
         <dependency>
             <groupId>org.springframework</groupId>

@@ -8,7 +8,7 @@ event, get a translation back) or to *be used by* one (answer a search,
 supply a feed). It carries the connection configuration, the error model
 and the transport so the application does not re-derive them.
 
-> **Status:** early. Two subsystems implemented (`ursa`, `centauri`), one planned.
+> **Status:** early. Three subsystems implemented (`ursa`, `centauri`, `zarniwoop`).
 > **Licence:** Apache-2.0.
 
 ## Modules
@@ -17,10 +17,10 @@ One module per Vancetope subsystem the application takes part in.
 
 | Module | Subsystem | Direction | Status |
 |---|---|---|---|
-| `vance-ode-core` | — | — | shared config, error model, HTTP transport |
+| `vance-ode-core` | — | — | shared config, error model, HTTP transport, inbound guard |
 | `vance-ode-ursa` | events / triggers | outbound | **implemented** |
 | `vance-ode-centauri` | feed streams | inbound | **implemented** |
-| `vance-ode-zarniwoop` | research / search | inbound | planned |
+| `vance-ode-zarniwoop` | research / search | inbound | **implemented** |
 
 ### Why by subsystem and not by direction
 
@@ -42,9 +42,14 @@ Not before — a module with a pom and no classes is structure without
 content, and which controller belongs in `centauri` is not knowable until
 a brain asks for one.
 
-`vance-ode-core` must stay free of Spring Web. It is what keeps the
-outbound-only case lean, and that only holds as long as nothing puts a
-controller in it.
+**No controller in `vance-ode-core`.** That is the rule that keeps the
+outbound-only case lean, and it is about the servlet container a controller
+drags in, not about the `org.springframework.web` types as such. Core does
+carry `de.mhus.vance.ode.inbound` — the shared-secret guard and the error
+body that every inbound module needs — with its two Spring Web dependencies
+`provided`, and provided scope is not transitive: an application that only
+fires events downloads nothing extra. The alternative was one copy of the
+guard per inbound module, and a duplicated authentication check drifts.
 
 ## Using it
 
@@ -222,6 +227,113 @@ oversight: an application embedding this module may already guard the path, and
 a library insisting on a second scheme it invented would be fighting its host.
 Set it when the endpoint would otherwise be reachable by anyone; it is then
 expected as `Authorization: Bearer <key>` and compared in constant time.
+
+## Zarniwoop — being searched
+
+The inbound direction again, and a different act. Centauri asks for entries in
+time order and a reader scrolls them; Zarniwoop asks a **question** and expects
+answers. An application may implement both interfaces and many will, but neither
+implies the other — a search index has no chronology to page through, and a feed
+has no query to answer.
+
+The point is that **the research options come from this service**: what can be
+searched here is declared here, not compiled into Vancetope.
+
+```xml
+<dependency>
+    <groupId>de.mhus.vance.ode</groupId>
+    <artifactId>vance-ode-zarniwoop</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+</dependency>
+```
+
+```java
+@Component
+class NewsSearchSource implements SearchSource {
+
+    @Override
+    public OdeSearchCapabilities capabilities() {
+        return OdeSearchCapabilities.of(OdeSearchModality.NEWS, 25);
+    }
+
+    @Override
+    public OdeSearchResponse search(OdeSearchQuery query) {
+        var rows = index.query(query.query(), query.maxResults());
+        if (rows.isEmpty()) {
+            return OdeSearchResponse.empty("no article matches");
+        }
+        return OdeSearchResponse.of(rows.stream().map(this::toHit).toList());
+    }
+}
+```
+
+```yaml
+vance:
+  ode:
+    zarniwoop:
+      path: /ode/search        # default; change it and tell the reader
+      api-key: ${SEARCH_KEY}   # empty means no check — same rule as centauri
+      max-results: 50          # what one request may cost, whatever a source declares
+```
+
+### The contract
+
+| Endpoint | Purpose |
+|---|---|
+| `GET {path}/capabilities` | what can be searched here; cached, caller-independent |
+| `POST {path}/search` | the search itself |
+| `GET {path}/content/{id}` | **optional** — the body of a hit, for expensive full texts |
+
+`search` is a POST although it changes nothing: `expertParams` is a structured
+map, and squeezing it into a query string would invent an encoding both sides
+would then have to agree on.
+
+### Three assurances
+
+1. **`capabilities` is caller-independent and cheap.** It is cached and reused
+   for every caller, so it must not reach out over a network per request. A
+   source whose abilities depend on who is asking says so by answering fewer
+   queries, not by varying this.
+2. **`search` answers in seconds, not minutes.** Vancetope runs it synchronously
+   inside a tool call, with a person waiting on the turn. Return what is ready
+   and say so in `note`; a partial answer beats a late one.
+3. **An empty result is not a failure.** `hits: []` with a `note` is the right
+   answer to "nothing found". A 5xx is not: the caller reads it as this source
+   being broken and stops asking for minutes, so "no news today" would also
+   mean "no news tomorrow". Throw when the search could not be *run*.
+
+### What the contract does not carry
+
+- **No reader identity.** Not a header, not a field — unlike Centauri, which has
+  a pseudonym. A search query is not a reading history, and personalised search
+  is a decision with its own justification. The field is absent so that nobody
+  can start depending on it before that decision is made.
+- **No prompt hint.** Vancetope can show a provider's own text to the model, and
+  a source explaining itself is appealing — but that is foreign text in a system
+  prompt, which is a separate question. Until it is answered there is nothing to
+  fill.
+- **No cursor.** Search has `maxResults`. A caller that wants a continuous
+  stream wants Centauri.
+
+### Closed vocabularies
+
+`OdeSearchModality` and `OdeSearchDomain` are enums, mirrored from Vancetope's
+own. They are closed because the LLM tool schemas enumerate their values, and a
+free-text field here would break that guarantee at the far end of the wire.
+Mirroring them as enums rather than accepting strings means an implementer finds
+out at compile time, not from a deserialisation error.
+
+Map onto the nearest existing value: a news index is `NEWS`, a document archive
+is `INTERNAL_DOC`. A genuinely new modality (`LEGAL`, `PATENT`) is a change to
+both sides of the contract, not something one source invents.
+
+### Optional fields must not be primitives
+
+`maxResults` in the request body is a boxed `Integer`, deliberately. Jackson 3
+fails deserialisation when the JSON field for a primitive is missing, and it does
+so **before any handler runs** — the caller gets a bodiless 400 for a field the
+contract calls optional, with nothing to read. Anything optional added to an
+inbound body later follows the same rule.
 
 ## Errors
 

@@ -22,6 +22,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import de.mhus.vance.ode.inbound.OdeApiKeyInterceptor;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -60,7 +61,7 @@ class OdeFeedControllerTest {
                 .standaloneSetup(new OdeFeedController(source, properties))
                 .addPlaceholderValue("vance.ode.centauri.path", PATH);
         if (properties.isSecured()) {
-            builder = builder.addInterceptors(new OdeFeedApiKeyInterceptor(properties));
+            builder = builder.addInterceptors(new OdeApiKeyInterceptor(properties));
         }
         return builder.build();
     }

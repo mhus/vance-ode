@@ -13,39 +13,40 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package de.mhus.vance.ode.centauri;
+package de.mhus.vance.ode.inbound;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 /**
- * Rejects feed requests without the configured shared secret.
+ * Rejects requests to an inbound endpoint without the configured shared secret.
  *
- * <p>An interceptor rather than a check inside each handler: five call sites
- * would be five chances to forget the sixth. Only registered when
- * {@link VanceOdeCentauriProperties#isSecured()} — an unset key means the
- * endpoint is open, on the assumption that the surrounding application may
- * already guard the path and does not need a second scheme fighting its own.
+ * <p>An interceptor rather than a check inside each handler: N call sites would
+ * be N chances to forget the N+1st. Registered only when
+ * {@link OdeInboundEndpoint#isSecured()}.
  */
-@RequiredArgsConstructor
-@Slf4j
-public class OdeFeedApiKeyInterceptor implements HandlerInterceptor {
+public final class OdeApiKeyInterceptor implements HandlerInterceptor {
+
+    private static final Logger log = LoggerFactory.getLogger(OdeApiKeyInterceptor.class);
 
     private static final String BEARER = "Bearer ";
 
-    private final VanceOdeCentauriProperties properties;
+    private final OdeInboundEndpoint endpoint;
+
+    public OdeApiKeyInterceptor(OdeInboundEndpoint endpoint) {
+        this.endpoint = endpoint;
+    }
 
     @Override
     public boolean preHandle(
             HttpServletRequest request, HttpServletResponse response, Object handler) {
-        if (!properties.isSecured()) {
+        if (!endpoint.isSecured()) {
             return true;
         }
         String header = request.getHeader(HttpHeaders.AUTHORIZATION);
@@ -53,9 +54,9 @@ public class OdeFeedApiKeyInterceptor implements HandlerInterceptor {
                 && matches(header.substring(BEARER.length()).trim())) {
             return true;
         }
-        log.debug("Centauri feed: rejected {} {} — missing or wrong bearer token",
+        log.debug("Ode inbound: rejected {} {} — missing or wrong bearer token",
                 request.getMethod(), request.getRequestURI());
-        response.setStatus(HttpStatus.UNAUTHORIZED.value());
+        response.setStatus(401);
         return false;
     }
 
@@ -63,6 +64,6 @@ public class OdeFeedApiKeyInterceptor implements HandlerInterceptor {
     private boolean matches(String presented) {
         return MessageDigest.isEqual(
                 presented.getBytes(StandardCharsets.UTF_8),
-                properties.getApiKey().getBytes(StandardCharsets.UTF_8));
+                endpoint.getApiKey().getBytes(StandardCharsets.UTF_8));
     }
 }

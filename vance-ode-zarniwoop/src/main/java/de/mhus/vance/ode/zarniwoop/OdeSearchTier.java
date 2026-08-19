@@ -13,24 +13,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package de.mhus.vance.ode.centauri;
+package de.mhus.vance.ode.zarniwoop;
 
 /**
- * Body of a refused request: a short machine-readable code and a sentence for
- * whoever is reading the log.
+ * How much a caller is asking for.
  *
- * <p>Both fields matter. Without the code the caller cannot distinguish a
- * malformed request from an unsupported one; without the sentence the person
- * debugging a new source has nothing to go on.
+ * <p>{@link #NORMAL} is a query and a result count. {@link #EXPERT} additionally
+ * carries {@code expertParams} — structured filters whose keys are the source's
+ * own vocabulary. A source that declares only {@code NORMAL} will never be sent
+ * expert params, which is the honest declaration for anything that cannot act
+ * on them.
  */
-public record OdeErrorResponse(String error, String message) {
-
-    public OdeErrorResponse {
-        if (error == null || error.isBlank()) {
-            error = "bad_request";
-        }
-        if (message == null) {
-            message = "";
-        }
-    }
+public enum OdeSearchTier {
+    NORMAL,
+    EXPERT
 }

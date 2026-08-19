@@ -15,6 +15,7 @@
  */
 package de.mhus.vance.ode.centauri;
 
+import de.mhus.vance.ode.inbound.OdeInboundEndpoint;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
@@ -25,10 +26,13 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * <p>Note what is absent: no brain URL, no tenant, no token of our own. This
  * module answers requests, it does not make them, so none of
  * {@code vance.ode.*} applies.
+ *
+ * <p>{@link OdeInboundEndpoint} is the slice the shared guard reads — path and
+ * secret. Everything else here is this endpoint's own business.
  */
 @ConfigurationProperties(prefix = "vance.ode.centauri")
 @Data
-public class VanceOdeCentauriProperties {
+public class VanceOdeCentauriProperties implements OdeInboundEndpoint {
 
     /**
      * Base path of the feed endpoint. The default is what Vancetope assumes,
@@ -56,8 +60,4 @@ public class VanceOdeCentauriProperties {
      * let one request cost.
      */
     private int maxLimit = 200;
-
-    public boolean isSecured() {
-        return !apiKey.isBlank();
-    }
 }

@@ -26,6 +26,7 @@
         <module>vance-ode-core</module>
         <module>vance-ode-ursa</module>
         <module>vance-ode-centauri</module>
+        <module>vance-ode-zarniwoop</module>
     </modules>
 
     <properties>
