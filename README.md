@@ -9,8 +9,7 @@ supply a feed). It carries the connection configuration, the error model
 and the transport so the application does not re-derive them.
 
 > **Status:** early. One subsystem implemented (`ursa`), two planned.
-> **Licence:** not yet decided — see [Licence](#licence) before depending
-> on this.
+> **Licence:** Apache-2.0.
 
 ## Modules
 
@@ -146,18 +145,28 @@ anyone else's build.
 
 ## Licence
 
-**Undecided — do not depend on this yet.**
+**Apache License 2.0** — see [LICENSE](LICENSE).
 
-The two neighbours disagree, and Ode sits between them:
+Deliberately different from its two neighbours, because it sits between
+them and has a different job:
 
-| Repo | Licence |
-|---|---|
-| `vance` | Business Source License 1.1 |
-| `hrafnagud` | GPLv3 |
+| Repo | Licence | Why |
+|---|---|---|
+| `vance` | Business Source License 1.1 | the product; protected |
+| `vance-ode` | **Apache-2.0** | meant to be embedded in software we do not own |
+| `hrafnagud` | GPLv3 | a consumer |
 
 BSL 1.1 is not an open-source licence and is not GPL-compatible, so an
-Ode under BSL could not legally be linked into `hrafnagud`. More
-generally, a library whose entire purpose is to be embedded in foreign
-software should not carry a licence that excludes most of the software it
-is meant for. Apache-2.0 is the conventional choice for an SDK and leaves
-the brain itself protected.
+Ode under BSL could not legally be linked into `hrafnagud`. Copyleft
+would have solved that but caused its own trouble: LGPL's
+replace-the-library requirement is written for shared objects and fits
+badly with a Spring Boot executable jar, and where an API boundary ends
+in Java — implementing an SPI, inheriting auto-configuration — is
+contested enough to make legal review a cost paid by exactly the adopters
+this library wants.
+
+Apache-2.0 also carries an explicit patent grant, which MIT does not.
+
+Nothing is given away by this: Ode contains no brain code, only contracts
+and transport. The value stays where it is protected, and the glue is
+free — the usual arrangement for a commercial product's client SDK.

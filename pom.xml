@@ -9,6 +9,19 @@
     <description>Spring Boot library that connects foreign software to Vancetope. One module per Vancetope subsystem the application takes part in — a consumer depends on the contracts it uses and inherits nothing else.</description>
     <packaging>pom</packaging>
 
+    <!--
+        Declared here rather than only in LICENSE so it travels with the
+        published artifact: dependency scanners and Maven Central read
+        this block, not the repository.
+    -->
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
     <modules>
         <module>vance-ode-core</module>
         <module>vance-ode-ursa</module>
