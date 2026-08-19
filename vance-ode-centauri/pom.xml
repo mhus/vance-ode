@@ -1,0 +1,68 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>de.mhus.vance.ode</groupId>
+        <artifactId>vance-ode</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>vance-ode-centauri</artifactId>
+    <name>vance-ode-centauri</name>
+    <description>Serves this application's time-ordered streams to Vancetope's Centauri feed reader. Implement one interface, get the REST contract. The only inbound module so far — Vancetope calls in, which is why this is the one module that needs Spring MVC.</description>
+    <packaging>jar</packaging>
+
+    <dependencies>
+        <!--
+            No dependency on vance-ode-core: this module never reaches a
+            brain. Core exists for the outbound direction (transport, brain
+            URL, per-event tokens) and none of it applies to answering a
+            request. Depending on it would make a feed source configure a
+            connection it does not open.
+        -->
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-autoconfigure</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-configuration-processor</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!--
+            spring-webmvc rather than spring-boot-starter-web: the starter
+            picks a servlet container and a logging implementation, and an
+            application that already serves HTTP has made both choices. We
+            need the annotations and the handler mapping, nothing else.
+        -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-webmvc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.servlet</groupId>
+            <artifactId>jakarta.servlet-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+</project>

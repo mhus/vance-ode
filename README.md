@@ -8,7 +8,7 @@ event, get a translation back) or to *be used by* one (answer a search,
 supply a feed). It carries the connection configuration, the error model
 and the transport so the application does not re-derive them.
 
-> **Status:** early. One subsystem implemented (`ursa`), two planned.
+> **Status:** early. Two subsystems implemented (`ursa`, `centauri`), one planned.
 > **Licence:** Apache-2.0.
 
 ## Modules
@@ -19,7 +19,7 @@ One module per Vancetope subsystem the application takes part in.
 |---|---|---|---|
 | `vance-ode-core` | — | — | shared config, error model, HTTP transport |
 | `vance-ode-ursa` | events / triggers | outbound | **implemented** |
-| `vance-ode-centauri` | feed streams | inbound | planned |
+| `vance-ode-centauri` | feed streams | inbound | **implemented** |
 | `vance-ode-zarniwoop` | research / search | inbound | planned |
 
 ### Why by subsystem and not by direction
@@ -114,6 +114,114 @@ Field names are Ode's, not the wire's. The brain still calls these
 `workflowName` and `workflowRunId` for historical reasons even when they
 carry a script target, and its own specification flags that as
 misleading; repeating it would be a poor thing for an SDK to do.
+
+## Serving a feed
+
+The inbound direction. Vancetope's feed reader — Centauri — asks this
+application for time-ordered entries and merges them with other sources into
+one endless scroll. Implement one interface and the REST contract is served:
+
+```xml
+<dependency>
+    <groupId>de.mhus.vance.ode</groupId>
+    <artifactId>vance-ode-centauri</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+</dependency>
+```
+
+```java
+@Component
+class NewsFeedSource implements FeedSource {
+
+    @Override
+    public OdeCapabilities capabilities() {
+        return OdeCapabilities.readOnly(100);
+    }
+
+    @Override
+    public List<OdeSelector> selectors() {
+        return List.of(OdeSelector.category("world", "World"),
+                       OdeSelector.category("tech", "Technology"));
+    }
+
+    @Override
+    public OdeItemPage items(OdeItemQuery query) {
+        var rows = repository.byCategory(query.selector(), query.cursor(), query.limit());
+        return new OdeItemPage(rows.map(this::toItem), rows.lastId(), rows.hasMore());
+    }
+}
+```
+
+```yaml
+vance:
+  ode:
+    centauri:
+      path: /ode/feed        # default; change it and tell the reader
+      api-key: ${FEED_KEY}   # empty means no check — see below
+```
+
+No `vance.ode.base-url` is involved: answering a request needs no brain.
+The bean is the switch — without a `FeedSource` nothing is mapped, because an
+unwanted endpoint is worse than a dormant client. It is reachable.
+
+### The contract
+
+| Endpoint | Purpose |
+|---|---|
+| `GET {path}/capabilities` | what this source can do; cached, reader-independent |
+| `GET {path}/selectors` | the finite taxonomy, for sources that have one |
+| `GET {path}/items` | one page of one stream |
+| `GET {path}/item/{id}` | full text, for sources whose list is a teaser |
+| `POST {path}/signal` | the back channel (see below) |
+
+Timestamps are ISO-8601 instants, the capabilities TTL an ISO-8601 duration —
+self-describing matters more between two systems than brevity.
+
+### Three assurances
+
+1. **Pages come back chronologically.** Personalise *which* entries appear if
+   you like; never their order. The reader merges your page with other sources
+   on the timestamp, so a per-reader ranking does not look broken — it quietly
+   produces a wrong sequence. A page in the wrong order is logged here, where
+   the person who can fix it will see it.
+2. **`items` answers without a reader pseudonym.** Scheduled digests have no
+   person behind them. A source that needs the pseudonym to respond breaks them.
+3. **`capabilities` and `selectors` never receive one.** They describe the
+   source, so they are cached across all readers.
+
+### The reader pseudonym
+
+`X-Vance-Reader` is opaque and salted per source, which means it is meaningless
+anywhere but here — two sources cannot join profiles over the same person. Use
+it to personalise selection or keep read marks. Never to authorise, and never
+as an identifier of a human: you are not being told who is reading, on purpose.
+
+It rides in a header rather than the query string because a value like this
+should not end up in access logs and intermediary cache keys.
+
+### The back channel
+
+Deliberately small: `REPORT` (wrong category, wrong language, broken link,
+duplicate, spam) and `REQUEST` (produce and keep a translation or a full text).
+The admission rule is that **a signal describes the item, not the reader** —
+which is why there is no "like" and why you are never asked to store somebody's
+preferences.
+
+Everything else reaches you as a deep link into your own UI instead: put a URL
+on `OdeItem.controlUrl` and the reader offers it as a way out of Centauri and
+into your interface. That keeps this vocabulary from growing while leaving you
+free to build whatever your own UI can express.
+
+Signals are fire-and-forget. Answer that you received one, not what you will do
+with it — Vancetope accordingly tells the reader "reported" and nothing more.
+
+### The shared secret
+
+`api-key` empty means **no check**, which is a decision rather than an
+oversight: an application embedding this module may already guard the path, and
+a library insisting on a second scheme it invented would be fighting its host.
+Set it when the endpoint would otherwise be reachable by anyone; it is then
+expected as `Authorization: Bearer <key>` and compared in constant time.
 
 ## Errors
 

@@ -25,6 +25,7 @@
     <modules>
         <module>vance-ode-core</module>
         <module>vance-ode-ursa</module>
+        <module>vance-ode-centauri</module>
     </modules>
 
     <properties>
@@ -84,6 +85,15 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <configuration>
+                    <!--
+                        spring-boot-starter-parent sets this for everyone; we
+                        import the BOM instead and so have to set it ourselves.
+                        Without it Spring cannot resolve parameter names, and
+                        every @RequestParam/@PathVariable that does not repeat
+                        its own name in the annotation fails at runtime with
+                        "parameter name information not available".
+                    -->
+                    <parameters>true</parameters>
                     <annotationProcessorPaths>
                         <path>
                             <groupId>org.projectlombok</groupId>
