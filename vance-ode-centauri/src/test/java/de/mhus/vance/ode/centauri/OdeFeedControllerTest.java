@@ -223,6 +223,27 @@ class OdeFeedControllerTest {
     }
 
     @Test
+    void signal_reportWithoutReason_isRefusedWithTheContractsErrorBody() throws Exception {
+        // The record validates in its constructor, so this is rejected during
+        // deserialisation — before any handler. The status was always 400; the
+        // body is what a caller needs to tell "you sent nonsense" from "this
+        // source cannot do that", and it used to be absent.
+        mvc.perform(post(PATH + "/signal")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"itemId":"i1","signal":"REPORT"}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("bad_request"));
+    }
+
+    @Test
+    void items_unknownDirection_isRefusedWithTheContractsErrorBody() throws Exception {
+        mvc.perform(get(PATH + "/items").param("direction", "SIDEWAYS"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("bad_request"));
+    }
+
+    @Test
     void signal_reportWithoutReason_isRefused() throws Exception {
         mvc.perform(post(PATH + "/signal")
                         .contentType(MediaType.APPLICATION_JSON)

@@ -37,8 +37,12 @@ public final class OdeInboundSecurity {
                 if (!endpoint.isSecured()) {
                     return;
                 }
+                // normalisedPath(), never getPath(): a configured trailing slash
+                // would otherwise build "/ode/feed//**", which matches nothing
+                // while the endpoints stay mapped — a guard that fails open.
+                String base = endpoint.normalisedPath();
                 registry.addInterceptor(new OdeApiKeyInterceptor(endpoint))
-                        .addPathPatterns(endpoint.getPath() + "/**");
+                        .addPathPatterns(base, base + "/**");
             }
         };
     }

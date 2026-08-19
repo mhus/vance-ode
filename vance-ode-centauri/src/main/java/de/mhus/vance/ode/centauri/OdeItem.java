@@ -37,9 +37,32 @@ import org.jspecify.annotations.Nullable;
  * for everything {@link OdeSignal} does not model. Vancetope validates it
  * before it becomes a link: https only, and the host must match the base URL
  * it knows you by.
+ *
+ * <p><b>{@code cursor} is what makes a mixed page resumable.</b> See below —
+ * it is the one field whose absence is silently expensive.
  */
 public record OdeItem(
         String id,
+        /**
+         * Resume token for <em>exactly this entry</em>: the value that, handed
+         * back as {@link OdeItemQuery#cursor()}, yields the entry after it.
+         *
+         * <p><b>Fill this in if your cursor is not the plain item id.</b> A
+         * reader merges your stream with others, so a page it shows is almost
+         * never the page it fetched from you — it cuts in the middle of your
+         * batch and has to resume from that entry, not from the end of the
+         * batch. {@link OdeItemPage#nextCursor()} cannot express that cut; only
+         * a per-entry token can.
+         *
+         * <p>Null means „my cursor is the item id", which is what the reader
+         * falls back to. For a source paging by {@code (publishedAt, id)} — the
+         * honest scheme, because timestamps are not unique — that fallback is
+         * wrong: the reader hands back a bare id, the source cannot parse it and
+         * starts from the top, and the reader's scroll repeats instead of
+         * advancing. Nothing errors, which is why this is stated here rather
+         * than left to be discovered.
+         */
+        @Nullable String cursor,
         Instant publishedAt,
         String title,
         String url,
@@ -65,13 +88,25 @@ public record OdeItem(
         if (title == null || title.isBlank()) {
             title = url;
         }
+        if (cursor != null && cursor.isBlank()) {
+            cursor = null;
+        }
         tags = tags == null ? List.of() : List.copyOf(tags);
         extras = extras == null ? Map.of() : Map.copyOf(extras);
     }
 
-    /** The minimum a source has to produce. */
+    /**
+     * The minimum a source has to produce — for a source whose cursor <b>is</b>
+     * the item id. Anything else has to set {@link #cursor()}; see its note.
+     */
     public static OdeItem of(String id, Instant publishedAt, String title, String url) {
-        return new OdeItem(id, publishedAt, title, url,
+        return new OdeItem(id, null, publishedAt, title, url,
                 null, null, null, null, null, null, List.of(), Map.of());
+    }
+
+    /** Copy of this entry carrying {@code value} as its resume token. */
+    public OdeItem withCursor(@Nullable String value) {
+        return new OdeItem(id, value, publishedAt, title, url, summary, body,
+                author, language, imageUrl, controlUrl, tags, extras);
     }
 }

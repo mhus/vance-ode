@@ -154,6 +154,13 @@ class NewsFeedSource implements FeedSource {
         var rows = repository.byCategory(query.selector(), query.cursor(), query.limit());
         return new OdeItemPage(rows.map(this::toItem), rows.lastId(), rows.hasMore());
     }
+
+    // withCursor only if your cursor is not the plain item id — see
+    // "Two cursors" below, where the silent failure is spelled out.
+    private OdeItem toItem(Row row) {
+        return OdeItem.of(row.id(), row.publishedAt(), row.title(), row.url())
+                .withCursor(row.publishedAt() + "|" + row.id());
+    }
 }
 ```
 
@@ -181,6 +188,24 @@ unwanted endpoint is worse than a dormant client. It is reachable.
 
 Timestamps are ISO-8601 instants, the capabilities TTL an ISO-8601 duration —
 self-describing matters more between two systems than brevity.
+
+### Two cursors, and you probably need both
+
+`OdeItemPage.nextCursor` resumes after the batch you returned. `OdeItem.cursor`
+resumes after **one entry** — and that is the one the reader reaches for most,
+because it merges your stream with others and therefore usually cuts your batch
+in the middle. A page-level token cannot describe that cut.
+
+Leave `OdeItem.cursor` null only if your cursor really is the bare item id; the
+reader falls back to that. If you page by `(publishedAt, id)` — the honest
+scheme, because timestamps are not unique — the fallback is wrong, and wrong
+**silently**: you receive a bare id, cannot parse it, start from the top, and the
+reader's scroll repeats a page instead of advancing. Nothing errors.
+
+One more shape to avoid: an **empty page with `hasMore: true` and no
+`nextCursor`**. Nothing about it is representable as progress, so the reader
+retires the stream for that scroll and logs why, rather than asking the identical
+question forever.
 
 ### Three assurances
 

@@ -75,6 +75,13 @@ public interface FeedSource {
      *
      * <p>Throw to signal a real failure — the caller classifies it and may
      * back off for a while. An empty page is not a failure.
+     *
+     * <p><b>Two cursors, and both are needed.</b>
+     * {@link OdeItemPage#nextCursor()} resumes after the batch you returned;
+     * {@link OdeItem#cursor()} resumes after one entry. The reader merges your
+     * stream with others and therefore usually cuts your batch in the middle, so
+     * the per-entry token is the one it reaches for most. Leave it null only if
+     * your cursor really is the bare item id.
      */
     OdeItemPage items(OdeItemQuery query);
 

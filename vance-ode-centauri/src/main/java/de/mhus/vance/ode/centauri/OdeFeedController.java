@@ -27,6 +27,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -36,6 +37,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 /**
  * The five endpoints Centauri speaks, over one {@link FeedSource}.
@@ -179,6 +181,43 @@ public class OdeFeedController {
     public ResponseEntity<OdeErrorResponse> onBadRequest(RuntimeException e) {
         return ResponseEntity.badRequest()
                 .body(new OdeErrorResponse("bad_request", String.valueOf(e.getMessage())));
+    }
+
+    /**
+     * The same answer for a body that never got as far as a handler.
+     *
+     * <p>{@link OdeSignalRequest} validates in its constructor, so a signal
+     * without a reason is rejected during deserialisation — Jackson wraps that,
+     * and the handler above never sees it. The status was already 400; what was
+     * missing is the {@link OdeErrorResponse} the contract promises, without
+     * which a caller cannot tell a malformed request from an unsupported one.
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<OdeErrorResponse> onUnreadableBody(
+            HttpMessageNotReadableException e) {
+        return ResponseEntity.badRequest()
+                .body(new OdeErrorResponse("bad_request", rootMessage(e)));
+    }
+
+    /**
+     * A query parameter that could not be converted — an unknown
+     * {@code direction}, a non-numeric {@code limit}. Spring answers these
+     * before any handler runs, and without this they arrive as a bodiless 400.
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<OdeErrorResponse> onBadParameter(
+            MethodArgumentTypeMismatchException e) {
+        return ResponseEntity.badRequest().body(new OdeErrorResponse(
+                "bad_request", "parameter '" + e.getName() + "' is not a valid value"));
+    }
+
+    /** The innermost message — the wrapper says nothing a caller can act on. */
+    private static String rootMessage(Throwable e) {
+        Throwable root = e;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+        return String.valueOf(root.getMessage());
     }
 
     // ── internals ────────────────────────────────────────────────────

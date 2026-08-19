@@ -40,4 +40,27 @@ public interface OdeInboundEndpoint {
     default boolean isSecured() {
         return getApiKey() != null && !getApiKey().isBlank();
     }
+
+    /**
+     * {@link #getPath()} in the one shape a path pattern can be built from:
+     * exactly one leading slash, no trailing one.
+     *
+     * <p><b>This is a security control, not tidiness.</b> Spring's
+     * {@code @RequestMapping} tolerates a configured {@code /ode/feed/} and still
+     * maps {@code /ode/feed/capabilities}, but the pattern
+     * {@code "/ode/feed/" + "/**"} matches nothing — so a plausible trailing-slash
+     * typo would leave the endpoints mapped and the guard silent, which is a
+     * failure that opens access rather than closing it. Normalising here means
+     * both the mapping and the guard are derived from the same value.
+     */
+    default String normalisedPath() {
+        String path = getPath() == null ? "" : getPath().trim();
+        while (path.endsWith("/")) {
+            path = path.substring(0, path.length() - 1);
+        }
+        while (path.startsWith("//")) {
+            path = path.substring(1);
+        }
+        return path.startsWith("/") ? path : "/" + path;
+    }
 }

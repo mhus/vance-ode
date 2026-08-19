@@ -22,6 +22,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.Nullable;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -153,6 +154,23 @@ public class OdeSearchController {
     public ResponseEntity<OdeErrorResponse> onBadRequest(IllegalArgumentException e) {
         return ResponseEntity.badRequest()
                 .body(new OdeErrorResponse("bad_request", String.valueOf(e.getMessage())));
+    }
+
+    /**
+     * The same answer for a body that never got as far as this handler — an
+     * unknown modality, a malformed number. Without it those arrive as a
+     * bodiless 400, and the contract's error code is the thing that tells a
+     * caller apart „you sent nonsense" from „this source cannot do that".
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<OdeErrorResponse> onUnreadableBody(
+            HttpMessageNotReadableException e) {
+        Throwable root = e;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+        return ResponseEntity.badRequest()
+                .body(new OdeErrorResponse("bad_request", String.valueOf(root.getMessage())));
     }
 
     // ── internals ────────────────────────────────────────────────────

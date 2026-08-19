@@ -31,9 +31,13 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>{@code nextCursor} is opaque to Vancetope and entirely yours. Two things
  * are worth knowing about how it is used: the reader may cut a page in the
- * middle and resume from a single entry's id instead, and it will keep asking
- * as long as {@code hasMore} is true — so an empty page with {@code hasMore}
- * needs a {@code nextCursor} that actually moves, or the reader loops.
+ * middle and resume from {@link OdeItem#cursor()} of a single entry instead
+ * (which is why that field exists — a bare id is only correct if your cursor
+ * <em>is</em> the id), and it will keep asking as long as {@code hasMore} is
+ * true — so an empty page with {@code hasMore} needs a {@code nextCursor} that
+ * actually moves, or the reader would loop. It no longer can: a reader that
+ * cannot advance a stream retires it and says so, which turns a source-side
+ * mistake into one missing stream rather than an endless scroll.
  */
 public record OdeItemPage(
         List<OdeItem> items,
