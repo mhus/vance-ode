@@ -61,6 +61,20 @@ public interface FeedSource {
     }
 
     /**
+     * One level of a facet's value tree, for a facet whose taxonomy is too
+     * large to travel inline (see
+     * {@link de.mhus.vance.ode.facet.OdeFacet#lazyChildren()}).
+     *
+     * <p>{@code parentId} null means the top level. The default answers
+     * nothing, which is right for every source that ships its values with its
+     * capabilities — and you are only asked about a facet that said otherwise.
+     */
+    default List<de.mhus.vance.ode.facet.OdeFacetValue> facetValues(
+            String key, @Nullable String parentId) {
+        return List.of();
+    }
+
+    /**
      * Reject an unusable free-text selector, returning a sentence a person can
      * act on. Only consulted for {@link OdeSelectorMode#FREEFORM} sources, and
      * worth implementing there: without it somebody types a tag with a

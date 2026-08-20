@@ -22,6 +22,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import de.mhus.vance.ode.facet.OdeFacet;
+import de.mhus.vance.ode.facet.OdeFacetValue;
 import de.mhus.vance.ode.inbound.OdeAuthDecision;
 import de.mhus.vance.ode.inbound.OdeAuthInterceptor;
 import de.mhus.vance.ode.inbound.OdeAuthService;
@@ -372,6 +374,78 @@ class OdeFeedControllerTest {
     // ── fake source ──────────────────────────────────────────────────
 
     /** Records what the controller handed over. */
+    // ── facets ───────────────────────────────────────────────────────
+
+    @Test
+    void facets_travelWithTheCapabilities() throws Exception {
+        mvc(source.withFacets(), properties)
+                .perform(get(PATH + "/capabilities"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.facets[0].key").value("origin-place"))
+                .andExpect(jsonPath("$.facets[0].hierarchical").value(true))
+                .andExpect(jsonPath("$.facets[0].values[1].parentId").value("m49:142"));
+    }
+
+    @Test
+    void facetValues_ofAnInlineFacetComeFromTheDeclaration() throws Exception {
+        mvc(source.withFacets(), properties)
+                .perform(get(PATH + "/facets").param("key", "origin-place"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].id").value("m49:142"));
+    }
+
+    @Test
+    void facetValues_ofALazyFacetAreAskedOfTheSource() throws Exception {
+        mvc(source.withLazyFacet(), properties)
+                .perform(get(PATH + "/facets")
+                        .param("key", "origin-place")
+                        .param("parent", "m49:142"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value("iso:SG"))
+                .andExpect(jsonPath("$[0].parentId").value("m49:142"));
+    }
+
+    @Test
+    void facetValues_ofAnUndeclaredKeyAreEmptyRatherThanAnError() throws Exception {
+        mvc.perform(get(PATH + "/facets").param("key", "origin-place"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+    }
+
+    @Test
+    void items_splitAFacetParameterAtTheFirstColonOnly() throws Exception {
+        MockMvc withFacets = mvc(source.withFacets(), properties);
+
+        withFacets.perform(get(PATH + "/items").param("facet", "origin-place:m49:142"))
+                .andExpect(status().isOk());
+
+        assertThat(source.lastQuery()).isNotNull();
+        assertThat(source.lastQuery().facets())
+                .containsEntry("origin-place", List.of("m49:142"));
+    }
+
+    @Test
+    void items_collectRepeatedValuesOfOneFacetAsADisjunction() throws Exception {
+        MockMvc withFacets = mvc(source.withFacets(), properties);
+
+        withFacets.perform(get(PATH + "/items")
+                        .param("facet", "origin-place:m49:142")
+                        .param("facet", "origin-place:iso:SG"))
+                .andExpect(status().isOk());
+
+        assertThat(source.lastQuery().facets())
+                .containsEntry("origin-place", List.of("m49:142", "iso:SG"));
+    }
+
+    @Test
+    void items_dropAFacetThisSourceNeverDeclared() throws Exception {
+        mvc.perform(get(PATH + "/items").param("facet", "origin-topic:gaming"))
+                .andExpect(status().isOk());
+
+        assertThat(source.lastQuery().facets()).isEmpty();
+    }
+
     private static final class RecordingSource implements FeedSource {
 
         private @Nullable OdeItemQuery lastQuery;
@@ -380,6 +454,8 @@ class OdeFeedControllerTest {
         private boolean sincePushdown;
         private boolean unordered;
         private boolean refuse;
+        private boolean facets;
+        private boolean lazyFacet;
 
         RecordingSource withSincePushdown() {
             this.sincePushdown = true;
@@ -393,6 +469,17 @@ class OdeFeedControllerTest {
 
         RecordingSource refusingSignals() {
             this.refuse = true;
+            return this;
+        }
+
+        RecordingSource withFacets() {
+            this.facets = true;
+            return this;
+        }
+
+        RecordingSource withLazyFacet() {
+            this.facets = true;
+            this.lazyFacet = true;
             return this;
         }
 
@@ -414,7 +501,19 @@ class OdeFeedControllerTest {
                     OdeSelectorMode.ENUMERABLE, Set.of(OdeSelectorKind.CATEGORY),
                     /* text */ true, /* language */ false, /* since */ sincePushdown,
                     /* newer */ false, /* fullBody */ false,
-                    50, Set.of(OdeSignal.REPORT), true, Duration.ofMinutes(30));
+                    50, Set.of(OdeSignal.REPORT), true, Duration.ofMinutes(30),
+                    facets
+                            ? List.of(new OdeFacet("origin-place", "Origin", true,
+                                    lazyFacet ? List.of() : List.of(
+                                            OdeFacetValue.of("m49:142", "Asia"),
+                                            new OdeFacetValue("iso:SG", "Singapore", "m49:142")),
+                                    lazyFacet))
+                            : List.of());
+        }
+
+        @Override
+        public List<OdeFacetValue> facetValues(String key, @Nullable String parentId) {
+            return List.of(new OdeFacetValue("iso:SG", "Singapore", parentId));
         }
 
         @Override

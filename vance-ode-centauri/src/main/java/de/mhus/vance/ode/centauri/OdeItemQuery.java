@@ -15,9 +15,12 @@
  */
 package de.mhus.vance.ode.centauri;
 
+import de.mhus.vance.ode.facet.OdeFacets;
 import de.mhus.vance.ode.inbound.OdeAuthService;
 import de.mhus.vance.ode.inbound.OdeCaller;
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 
@@ -53,13 +56,41 @@ public record OdeItemQuery(
         @Nullable String text,
         Set<String> languages,
         @Nullable Instant since,
+        /**
+         * Facet selection, {@code key -> values} — conjunction across keys,
+         * disjunction within one. Only keys you declared in
+         * {@link OdeCapabilities#facets()} ever appear here, so there is
+         * nothing to validate: if it is in the map, you promised to answer
+         * it.
+         *
+         * <p>A hierarchical facet hands you a single node
+         * ({@code m49:142}); resolving containment down to your entries is
+         * yours, because you hold the hierarchy.
+         */
+        Map<String, List<String>> facets,
         @Nullable String reader,
         @Nullable OdeCaller caller) {
+
+    /** The same query without facets. */
+    public OdeItemQuery(
+            String selector,
+            @Nullable String cursor,
+            OdeDirection direction,
+            int limit,
+            @Nullable String text,
+            Set<String> languages,
+            @Nullable Instant since,
+            @Nullable String reader,
+            @Nullable OdeCaller caller) {
+        this(selector, cursor, direction, limit, text, languages, since,
+                Map.of(), reader, caller);
+    }
 
     public OdeItemQuery {
         selector = selector == null ? "" : selector.trim();
         direction = direction == null ? OdeDirection.OLDER : direction;
         languages = languages == null ? Set.of() : Set.copyOf(languages);
+        facets = OdeFacets.normalize(facets);
         text = blankToNull(text);
         cursor = blankToNull(cursor);
         reader = blankToNull(reader);

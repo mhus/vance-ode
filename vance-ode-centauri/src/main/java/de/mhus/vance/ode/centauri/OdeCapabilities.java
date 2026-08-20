@@ -15,7 +15,9 @@
  */
 package de.mhus.vance.ode.centauri;
 
+import de.mhus.vance.ode.facet.OdeFacet;
 import java.time.Duration;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -45,11 +47,38 @@ public record OdeCapabilities(
         int maxPageSize,
         Set<OdeSignal> signalsAccepted,
         boolean carriesControlUrl,
-        Duration capabilitiesTtl) {
+        Duration capabilitiesTtl,
+        /**
+         * Dimensions this source can be filtered by — see
+         * {@link OdeFacet}. Empty is the normal answer.
+         *
+         * <p>Unlike the {@code pushdown*} flags above this one has no
+         * fallback: what you decline here is not filtered elsewhere, it
+         * simply takes you out of a request that asked for it.
+         */
+        List<OdeFacet> facets) {
 
     public static final Duration DEFAULT_TTL = Duration.ofMinutes(30);
 
     public static final int DEFAULT_MAX_PAGE_SIZE = 40;
+
+    /** The same declaration without facets — the shape that predates them. */
+    public OdeCapabilities(
+            OdeSelectorMode selectorMode,
+            Set<OdeSelectorKind> selectorKinds,
+            boolean pushdownTextSearch,
+            boolean pushdownLanguage,
+            boolean pushdownSince,
+            boolean supportsNewerDirection,
+            boolean carriesFullBody,
+            int maxPageSize,
+            Set<OdeSignal> signalsAccepted,
+            boolean carriesControlUrl,
+            Duration capabilitiesTtl) {
+        this(selectorMode, selectorKinds, pushdownTextSearch, pushdownLanguage,
+                pushdownSince, supportsNewerDirection, carriesFullBody, maxPageSize,
+                signalsAccepted, carriesControlUrl, capabilitiesTtl, List.of());
+    }
 
     public OdeCapabilities {
         if (selectorMode == null) {
@@ -57,6 +86,7 @@ public record OdeCapabilities(
         }
         selectorKinds = selectorKinds == null ? Set.of() : Set.copyOf(selectorKinds);
         signalsAccepted = signalsAccepted == null ? Set.of() : Set.copyOf(signalsAccepted);
+        facets = facets == null ? List.of() : List.copyOf(facets);
         if (maxPageSize <= 0) {
             maxPageSize = DEFAULT_MAX_PAGE_SIZE;
         }

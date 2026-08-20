@@ -15,6 +15,9 @@
  */
 package de.mhus.vance.ode.centauri;
 
+import de.mhus.vance.ode.facet.OdeFacet;
+import de.mhus.vance.ode.facet.OdeFacetValue;
+import de.mhus.vance.ode.facet.OdeFacets;
 import de.mhus.vance.ode.inbound.OdeCaller;
 import de.mhus.vance.ode.inbound.OdeErrorResponse;
 import java.time.Instant;
@@ -81,6 +84,32 @@ public class OdeFeedController {
     }
 
     /**
+     * One level of a facet's value tree, for a facet too large to travel
+     * inline in {@link #capabilities()}.
+     *
+     * <p>{@code parent} absent means the top level. An undeclared key is an
+     * empty list rather than a 404: a reader holding a stale capabilities
+     * response should find the facet gone, not the endpoint broken.
+     */
+    @GetMapping("/facets")
+    public List<OdeFacetValue> facetValues(
+            @RequestParam String key,
+            @RequestParam(required = false) @Nullable String parent) {
+
+        OdeFacet facet = OdeFacets.find(source.capabilities().facets(), key);
+        if (facet == null) {
+            log.debug("Facet values requested for undeclared key '{}' — empty", key);
+            return List.of();
+        }
+        if (!facet.lazyChildren()) {
+            // Everything this facet has already travelled with the
+            // capabilities; answering from there keeps one source of truth.
+            return facet.values();
+        }
+        return source.facetValues(key, parent);
+    }
+
+    /**
      * One page of one stream.
      *
      * <p>Three guards run before the source sees anything: a direction it
@@ -89,6 +118,12 @@ public class OdeFeedController {
      * operator allows. Filters are narrowed to the declared pushdowns, so a
      * source is never handed a filter it would silently ignore — the caller
      * applies the rest itself.
+     *
+     * <p>Facets travel as repeated {@code facet=<key>:<value>} parameters and
+     * are narrowed the same way, to the keys this source declared. Unlike the
+     * pushdowns there is no „the caller applies the rest": a reader that
+     * selected a facet this source does not have skips it entirely rather
+     * than asking and filtering afterwards.
      */
     @GetMapping("/items")
     public OdeItemPage items(
@@ -99,6 +134,7 @@ public class OdeFeedController {
             @RequestParam(required = false) @Nullable String text,
             @RequestParam(required = false) @Nullable List<String> languages,
             @RequestParam(required = false) @Nullable String since,
+            @RequestParam(name = "facet", required = false) @Nullable List<String> facets,
             @RequestHeader(name = OdeFeedHeaders.READER, required = false)
             @Nullable String reader,
             @RequestAttribute(name = OdeCaller.ATTRIBUTE, required = false)
@@ -124,6 +160,7 @@ public class OdeFeedController {
                 caps.pushdownTextSearch() ? text : null,
                 caps.pushdownLanguage() ? normalizeLanguages(languages) : Set.of(),
                 caps.pushdownSince() ? parseSince(since) : null,
+                OdeFacets.parse(facets, OdeFacets.keysOf(caps.facets())),
                 reader,
                 caller);
 
