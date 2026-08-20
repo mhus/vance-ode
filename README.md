@@ -53,11 +53,15 @@ guard per inbound module, and a duplicated authentication check drifts.
 
 ## Using it
 
+Released to [Maven Central](https://central.sonatype.com/namespace/de.mhus.vance.ode)
+under the group `de.mhus.vance.ode` — no repository declaration needed. Take only
+the modules you take part in:
+
 ```xml
 <dependency>
     <groupId>de.mhus.vance.ode</groupId>
     <artifactId>vance-ode-ursa</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.0</version>
 </dependency>
 ```
 
@@ -130,7 +134,7 @@ one endless scroll. Implement one interface and the REST contract is served:
 <dependency>
     <groupId>de.mhus.vance.ode</groupId>
     <artifactId>vance-ode-centauri</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.0</version>
 </dependency>
 ```
 
@@ -271,7 +275,7 @@ searched here is declared here, not compiled into Vancetope.
 <dependency>
     <groupId>de.mhus.vance.ode</groupId>
     <artifactId>vance-ode-zarniwoop</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.0</version>
 </dependency>
 ```
 
