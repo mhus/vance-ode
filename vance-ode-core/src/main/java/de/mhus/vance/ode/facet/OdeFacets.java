@@ -16,10 +16,12 @@
 package de.mhus.vance.ode.facet;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -108,7 +110,11 @@ public final class OdeFacets {
                 out.put(key, List.copyOf(values));
             }
         }
-        return Map.copyOf(out);
+        // unmodifiableMap over the LinkedHashMap, not Map.copyOf: the latter
+        // leaves iteration order unspecified and in practice randomises it per
+        // JVM run, which would make "order kept" above a false promise — and
+        // the order is what a form renders its filters in.
+        return Collections.unmodifiableMap(out);
     }
 
     /**
@@ -132,7 +138,32 @@ public final class OdeFacets {
                 log.debug("Ignoring facet '{}' — not declared by this source", e.getKey());
             }
         }
-        return Map.copyOf(out);
+        return Collections.unmodifiableMap(out);
+    }
+
+    /**
+     * The values one level below {@code parent}, or the top level when it is
+     * absent.
+     *
+     * <p>For a facet whose whole tree travelled inline. The controller answers
+     * {@code /facets} from that list rather than asking the source again, but it
+     * still owes the reader one level: {@code parent} is the question, and
+     * returning the flat tree would answer a different one — the reader would
+     * render every descendant as a direct child.
+     */
+    public static List<OdeFacetValue> childrenOf(
+            @Nullable List<OdeFacetValue> values, @Nullable String parent) {
+        if (values == null || values.isEmpty()) {
+            return List.of();
+        }
+        String wanted = parent == null || parent.isBlank() ? null : parent.trim();
+        List<OdeFacetValue> out = new ArrayList<>();
+        for (OdeFacetValue value : values) {
+            if (Objects.equals(value.parentId(), wanted)) {
+                out.add(value);
+            }
+        }
+        return List.copyOf(out);
     }
 
     /** The keys a list of declared facets covers. */

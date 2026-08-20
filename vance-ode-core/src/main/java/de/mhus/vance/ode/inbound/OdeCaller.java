@@ -15,6 +15,7 @@
  */
 package de.mhus.vance.ode.inbound;
 
+import de.mhus.vance.ode.core.OdeCopy;
 import java.util.Map;
 
 /**
@@ -59,7 +60,7 @@ public record OdeCaller(String id, Map<String, Object> attributes) {
             throw new IllegalArgumentException("caller id is required");
         }
         id = id.trim();
-        attributes = attributes == null ? Map.of() : Map.copyOf(attributes);
+        attributes = OdeCopy.map(attributes);
     }
 
     public static OdeCaller of(String id) {

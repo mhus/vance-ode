@@ -18,6 +18,7 @@ package de.mhus.vance.ode.centauri;
 import de.mhus.vance.ode.facet.OdeFacet;
 import de.mhus.vance.ode.facet.OdeFacetValue;
 import de.mhus.vance.ode.facet.OdeFacets;
+import de.mhus.vance.ode.inbound.OdeBadRequestException;
 import de.mhus.vance.ode.inbound.OdeCaller;
 import de.mhus.vance.ode.inbound.OdeErrorResponse;
 import java.time.Instant;
@@ -104,7 +105,10 @@ public class OdeFeedController {
         if (!facet.lazyChildren()) {
             // Everything this facet has already travelled with the
             // capabilities; answering from there keeps one source of truth.
-            return facet.values();
+            // Still one level at a time: the reader asked for the children of
+            // `parent`, and handing back the whole flat tree would be a
+            // different answer to a different question.
+            return OdeFacets.childrenOf(facet.values(), parent);
         }
         return source.facetValues(key, parent);
     }
@@ -142,13 +146,13 @@ public class OdeFeedController {
 
         OdeCapabilities caps = source.capabilities();
         if (direction == OdeDirection.NEWER && !caps.supportsNewerDirection()) {
-            throw new IllegalArgumentException(
+            throw new OdeBadRequestException(
                     "this source does not serve direction=NEWER");
         }
         if (caps.selectorMode() == OdeSelectorMode.FREEFORM) {
             Optional<String> complaint = source.validateSelector(selector);
             if (complaint.isPresent()) {
-                throw new IllegalArgumentException(complaint.get());
+                throw new OdeBadRequestException(complaint.get());
             }
         }
 
@@ -223,10 +227,24 @@ public class OdeFeedController {
      * source failure — the caller backs off from 5xx, and a wrong parameter is
      * not something backing off would fix.
      */
-    @ExceptionHandler({IllegalArgumentException.class, DateTimeParseException.class})
+    @ExceptionHandler({OdeBadRequestException.class, DateTimeParseException.class})
     public ResponseEntity<OdeErrorResponse> onBadRequest(RuntimeException e) {
         return ResponseEntity.badRequest()
-                .body(new OdeErrorResponse("bad_request", String.valueOf(e.getMessage())));
+                .body(new OdeErrorResponse("bad_request", OdeBadRequestException.describe(e)));
+    }
+
+    /**
+     * Anything the source itself threw. 500, deliberately: catching plain
+     * {@link IllegalArgumentException} here used to answer 400 for a source that
+     * had fallen over inside {@link FeedSource#items}, and the mistake ran the
+     * wrong way — a reader does not cool down on a 400, so a broken source kept
+     * being asked at full rate.
+     */
+    @ExceptionHandler(RuntimeException.class)
+    public ResponseEntity<OdeErrorResponse> onSourceFailure(RuntimeException e) {
+        log.error("Centauri feed: the source failed to answer", e);
+        return ResponseEntity.internalServerError()
+                .body(new OdeErrorResponse("source_failed", OdeBadRequestException.describe(e)));
     }
 
     /**
@@ -263,7 +281,7 @@ public class OdeFeedController {
         while (root.getCause() != null && root.getCause() != root) {
             root = root.getCause();
         }
-        return String.valueOf(root.getMessage());
+        return OdeBadRequestException.describe(root);
     }
 
     // ── internals ────────────────────────────────────────────────────
@@ -275,9 +293,17 @@ public class OdeFeedController {
      */
     private int clampLimit(int requested, OdeCapabilities caps) {
         if (requested <= 0) {
-            throw new IllegalArgumentException("limit must be > 0, was " + requested);
+            throw new OdeBadRequestException("limit must be > 0, was " + requested);
         }
-        return Math.min(requested, Math.min(caps.maxPageSize(), properties.getMaxLimit()));
+        // A configured ceiling of zero or less is read as "unset", not as
+        // "serve nothing": it would otherwise clamp every page to 0 and refuse
+        // each one with a message blaming the caller's `limit`.
+        return Math.min(requested, Math.min(
+                positiveOr(caps.maxPageSize()), positiveOr(properties.getMaxLimit())));
+    }
+
+    private static int positiveOr(int configured) {
+        return configured > 0 ? configured : Integer.MAX_VALUE;
     }
 
     private static Set<String> normalizeLanguages(@Nullable List<String> raw) {
@@ -306,8 +332,8 @@ public class OdeFeedController {
         try {
             return Instant.parse(raw.trim());
         } catch (DateTimeParseException e) {
-            throw new IllegalArgumentException(
-                    "since must be an ISO-8601 instant, was '" + raw + "'");
+            throw new OdeBadRequestException(
+                    "since must be an ISO-8601 instant, was '" + raw + "'", e);
         }
     }
 

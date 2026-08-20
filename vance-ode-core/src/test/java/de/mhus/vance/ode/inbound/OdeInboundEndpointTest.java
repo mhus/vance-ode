@@ -75,6 +75,16 @@ class OdeInboundEndpointTest {
     }
 
     @Test
+    void normalisedPath_rootPath_isEmptyNotASlash() {
+        // "/" would build the patterns "/" and "//**", neither of which matches
+        // the /items the controller still maps — the same fail-open as the
+        // trailing slash, one level up.
+        assertThat(endpoint("/", "k").normalisedPath()).isEmpty();
+        assertThat(endpoint("", "k").normalisedPath()).isEmpty();
+        assertThat(endpoint("  //  ", "k").normalisedPath()).isEmpty();
+    }
+
+    @Test
     void isSecured_blankKey_meansNoCheck() {
         assertThat(endpoint("/ode/feed", "  ").isSecured()).isFalse();
         assertThat(endpoint("/ode/feed", "k").isSecured()).isTrue();

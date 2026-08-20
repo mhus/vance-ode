@@ -52,6 +52,13 @@ public interface OdeInboundEndpoint {
      * typo would leave the endpoints mapped and the guard silent, which is a
      * failure that opens access rather than closing it. Normalising here means
      * both the mapping and the guard are derived from the same value.
+     *
+     * <p>An endpoint mounted at the application root normalises to the
+     * <b>empty string</b>, not to {@code "/"}. Same reasoning: {@code @RequestMapping("")}
+     * still maps {@code /items}, while the patterns built from {@code "/"} would be
+     * {@code "/"} and {@code "//**"} — neither of which matches it. Callers building
+     * patterns must treat the empty result as "everything below the root"; see
+     * {@link OdeInboundSecurity}.
      */
     default String normalisedPath() {
         String path = getPath() == null ? "" : getPath().trim();
@@ -60,6 +67,9 @@ public interface OdeInboundEndpoint {
         }
         while (path.startsWith("//")) {
             path = path.substring(1);
+        }
+        if (path.isEmpty() || path.equals("/")) {
+            return "";
         }
         return path.startsWith("/") ? path : "/" + path;
     }

@@ -15,6 +15,7 @@
  */
 package de.mhus.vance.ode.zarniwoop;
 
+import de.mhus.vance.ode.core.OdeCopy;
 import java.util.List;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
@@ -49,7 +50,10 @@ public record OdeSearchRequestBody(
         @Nullable Map<String, List<String>> facets) {
 
     public OdeSearchRequestBody {
-        expertParams = expertParams == null ? Map.of() : Map.copyOf(expertParams);
-        facets = facets == null ? Map.of() : Map.copyOf(facets);
+        // OdeCopy, not Map.copyOf: this record is built straight from a
+        // caller's JSON, and copyOf throws on a null value. `{"facets":{"a":null}}`
+        // used to leave the endpoint answering its own NPE as the caller's fault.
+        expertParams = OdeCopy.map(expertParams);
+        facets = OdeCopy.map(facets);
     }
 }

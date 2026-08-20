@@ -188,7 +188,18 @@ public class UrsaEventClient {
         return node.toString();
     }
 
+    /**
+     * Percent-encode one <b>path segment</b>.
+     *
+     * <p>{@link URLEncoder} does form encoding, where a space is {@code +}. In a
+     * path a {@code +} is a literal plus, so a tenant or event name containing a
+     * space used to travel as {@code my+tenant} and the brain looked up exactly
+     * that — a {@code NOT_FOUND} for a name that exists. Everything else
+     * {@code URLEncoder} escapes is also safe in a segment (including the
+     * {@code /} that must not survive one), so the one substitution is the whole
+     * difference.
+     */
     private static String encode(String value) {
-        return URLEncoder.encode(value, StandardCharsets.UTF_8);
+        return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
     }
 }

@@ -188,6 +188,7 @@ unwanted endpoint is worse than a dormant client. It is reachable.
 | `GET {path}/selectors` | the finite taxonomy, for sources that have one |
 | `GET {path}/items` | one page of one stream |
 | `GET {path}/item/{id}` | full text, for sources whose list is a teaser |
+| `GET {path}/facets` | one level of a facet's value tree, for trees too large to travel inline |
 | `POST {path}/signal` | the back channel (see below) |
 
 Timestamps are ISO-8601 instants, the capabilities TTL an ISO-8601 duration —
@@ -314,6 +315,7 @@ vance:
 |---|---|
 | `GET {path}/capabilities` | what can be searched here; cached, caller-independent |
 | `POST {path}/search` | the search itself |
+| `GET {path}/facets` | one level of a facet's value tree, for trees too large to travel inline |
 | `GET {path}/content/{id}` | **optional** — the body of a hit, for expensive full texts |
 
 `search` is a POST although it changes nothing: `expertParams` is a structured
@@ -366,6 +368,56 @@ fails deserialisation when the JSON field for a primitive is missing, and it doe
 so **before any handler runs** — the caller gets a bodiless 400 for a field the
 contract calls optional, with nothing to read. Anything optional added to an
 inbound body later follows the same rule.
+
+## Facets — being filtered
+
+A **facet** is a dimension your source can be filtered by, and it works the same
+way on both contracts. You declare it in your capabilities; a reader renders it
+as a filter and sends the selection back.
+
+```java
+OdeFacet.tree("subject-place", "Where it is about", List.of(
+        OdeFacetValue.of("m49:142", "Asia"),
+        new OdeFacetValue("iso:SG", "Singapore", "m49:142")));
+```
+
+**Declaring one is a promise to apply it.** There is no "I can label this but
+not query it" — the reader does no local facet filtering, so a facet you declare
+and ignore is a filter that silently does nothing. If you cannot answer a
+dimension, leave it out: a reader that selected it will skip you for that
+request and say so, which is the honest outcome.
+
+The selection travels as repeated `facet=<key>:<value>` query parameters on the
+feed side and as a map in the body on the search side. It is split at the
+**first** colon, because values contain colons themselves (`m49:142`, `iso:SG`).
+Keys you never declared are dropped and logged rather than refused — a reader
+may be newer than your end, and one filter it can live without should not turn
+into a broken endpoint.
+
+Two of the keys carry an agreed value system and mean the same thing across
+sources: `origin-place` (where the *publisher* sits) and `subject-place` (what
+the entry is *about*), both using `m49:` above the country level and `iso:` at
+it. They are separate keys on purpose — a wire agency in London filing from
+Singapore is both, differently. `origin-topic` and `subject-topic` are reserved
+but have no agreed vocabulary yet, so they behave as source-specific keys. Any
+other key is yours alone.
+
+### Trees too large to travel inline
+
+At most `OdeFacet.MAX_INLINE_VALUES` (500) values ride in the capabilities
+response — it is cached, and it lands in every configuration form on the other
+end. Past that, set `lazyChildren` and serve the tree one level at a time:
+
+```java
+@Override
+public List<OdeFacetValue> facetValues(String key, @Nullable String parent) {
+    return topics.childrenOf(parent);   // parent == null means the top level
+}
+```
+
+`GET {path}/facets?key=…&parent=…` answers one level. For a facet whose values
+did travel inline the endpoint answers from that list without consulting you —
+still one level at a time, because `parent` is the question that was asked.
 
 ## Who may call
 
@@ -455,6 +507,20 @@ fix configuration, or give up — into a chain of instanceof checks.
 | `REMOTE_FAILURE` | yes | the action itself failed |
 | `TRANSPORT` | yes | brain unreachable |
 | `PROTOCOL` | no | a 2xx that was not the expected shape |
+
+On the **inbound** side — the endpoints you serve — a refusal carries
+`OdeErrorResponse`, a short code and a sentence:
+
+| Code | Status | Meaning |
+|---|---|---|
+| `bad_request` | 400 | the caller sent something this endpoint will not serve |
+| `unauthorized` | 401 | missing or rejected bearer token |
+| `source_failed` | 500 | your source threw; the reader is expected to back off |
+
+The split matters more than it looks. A reader cools down on a 5xx and not on a
+400, so a source that has fallen over must not answer 400 — it would keep being
+asked at full rate. Throw `OdeBadRequestException` for your own refusals;
+anything else that escapes is treated as the source failing.
 
 ## Requirements
 

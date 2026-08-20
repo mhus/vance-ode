@@ -15,6 +15,7 @@
  */
 package de.mhus.vance.ode.zarniwoop;
 
+import java.nio.charset.StandardCharsets;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -50,9 +51,17 @@ public record OdeHitContent(
         }
     }
 
-    /** Short body shipped with the hit — the normal case. */
+    /**
+     * Short body shipped with the hit — the normal case.
+     *
+     * <p>The size is measured in UTF-8 bytes, which is what the field says and
+     * what the caller is budgeting against. {@code String.length()} counts
+     * UTF-16 chars and under-reports every body that is not plain ASCII — by a
+     * third for German, by two thirds for Greek or Japanese.
+     */
     public static OdeHitContent embedded(String contentId, String text) {
         return new OdeHitContent(contentId, "text/plain",
-                text == null ? 0 : text.length(), OdeContentInline.EMBED_TEXT, text);
+                text == null ? 0 : text.getBytes(StandardCharsets.UTF_8).length,
+                OdeContentInline.EMBED_TEXT, text);
     }
 }

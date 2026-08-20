@@ -15,6 +15,7 @@
  */
 package de.mhus.vance.ode.zarniwoop;
 
+import de.mhus.vance.ode.core.OdeCopy;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
@@ -56,7 +57,7 @@ public record OdeSearchHit(
         if (modality == null) {
             throw new IllegalArgumentException("modality is required");
         }
-        extras = extras == null ? Map.of() : Map.copyOf(extras);
+        extras = OdeCopy.map(extras);
     }
 
     public static OdeSearchHit of(

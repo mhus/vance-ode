@@ -19,7 +19,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
+import org.springframework.web.servlet.handler.MappedInterceptor;
+import org.springframework.web.util.ServletRequestPathUtils;
 
 /**
  * Whether the guard is registered at all.
@@ -49,6 +52,32 @@ class OdeInboundSecurityTest {
         assertThat(interceptorsOf(endpoint(""), ALLOW_ALL)).hasSize(1);
     }
 
+    @Test
+    void configuredPath_guardsTheEndpointsBelowIt() {
+        assertThat(guards("/ode/search", "/ode/search/search")).isTrue();
+        assertThat(guards("/ode/search", "/ode/search/capabilities")).isTrue();
+        assertThat(guards("/ode/search", "/something/else")).isFalse();
+    }
+
+    @Test
+    void rootPath_guardsTheEndpointsItStillMaps() {
+        // The endpoints are mapped at /search and /capabilities when the path is
+        // empty. The patterns used to be built from "/" — "/" and "//**" — which
+        // match neither, leaving the guard silent over a served endpoint.
+        assertThat(guards("", "/search")).isTrue();
+        assertThat(guards("/", "/capabilities")).isTrue();
+    }
+
+    /** Whether a request for {@code requestUri} would hit the registered guard. */
+    private static boolean guards(String configuredPath, String requestUri) {
+        List<Object> interceptors = interceptorsOf(endpoint(configuredPath, "s3cret"), null);
+        assertThat(interceptors).hasSize(1);
+        MappedInterceptor mapped = (MappedInterceptor) interceptors.get(0);
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", requestUri);
+        ServletRequestPathUtils.parseAndCache(request);
+        return mapped.matches(request);
+    }
+
     private static List<Object> interceptorsOf(
             OdeInboundEndpoint endpoint, OdeAuthService authService) {
         ProbeRegistry registry = new ProbeRegistry();
@@ -57,11 +86,15 @@ class OdeInboundSecurityTest {
     }
 
     private static OdeInboundEndpoint endpoint(String apiKey) {
+        return endpoint("/ode/search", apiKey);
+    }
+
+    private static OdeInboundEndpoint endpoint(String path, String apiKey) {
         return new OdeInboundEndpoint() {
 
             @Override
             public String getPath() {
-                return "/ode/search";
+                return path;
             }
 
             @Override

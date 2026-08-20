@@ -586,4 +586,96 @@ class OdeSearchControllerTest {
                 .andExpect(jsonPath("$.length()").value(0));
     }
 
+    @Test
+    void facetValues_ofAnInlineFacet_areOneLevelNotTheFlatTree() throws Exception {
+        source.withCapabilities(capsWithPlaceFacet(false));
+
+        // Answering from the declaration is an optimisation. It must not change
+        // which question was asked: no parent means the top level.
+        mvc.perform(get(PATH + "/facets").param("key", "origin-place"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].id").value("m49:142"));
+
+        mvc.perform(get(PATH + "/facets")
+                        .param("key", "origin-place")
+                        .param("parent", "m49:142"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].id").value("iso:SG"));
+    }
+
+    // ── refusals vs. failures ────────────────────────────────────────
+
+    @Test
+    void search_whenTheSourceThrows_isAServerErrorNotABadRequest() throws Exception {
+        // The reader backs off from a 5xx and not from a 400. A source that has
+        // fallen over answered as 400 would keep being asked at full rate.
+        source.failingWith(new IllegalArgumentException("index client blew up"));
+
+        mvc.perform(post(PATH + "/search")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"query":"tariffs","modality":"NEWS"}"""))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.error").value("source_failed"))
+                .andExpect(jsonPath("$.message").value("index client blew up"));
+    }
+
+    @Test
+    void search_whenTheSourceThrowsWithoutAMessage_saysWhatFailed() throws Exception {
+        // Never the literal string "null" — that is the one answer the error
+        // body documents must not happen.
+        source.failingWith(new NullPointerException());
+
+        mvc.perform(post(PATH + "/search")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"query":"tariffs","modality":"NEWS"}"""))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.message").value("NullPointerException"));
+    }
+
+    @Test
+    void search_undeclaredModality_staysABadRequest() throws Exception {
+        mvc.perform(post(PATH + "/search")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"query":"tariffs","modality":"IMAGE"}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("bad_request"));
+    }
+
+    @Test
+    void search_nullInsideAPassThroughMap_isDroppedNotRefused() throws Exception {
+        // Well-formed JSON that Map.copyOf used to answer with the endpoint's
+        // own NPE — reported as the caller's fault, with the message "null".
+        mvc.perform(post(PATH + "/search")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"query":"tariffs","modality":"NEWS",
+                                 "expertParams":{"desk":null},
+                                 "facets":{"origin-place":null}}"""))
+                .andExpect(status().isOk());
+
+        assertThat(source.received()).hasSize(1);
+        assertThat(source.received().get(0).facets()).isEmpty();
+    }
+
+    @Test
+    void search_maxResultsCeilingOfZero_isReadAsUnset() throws Exception {
+        // The query record refuses a non-positive count, so a ceiling of 0 used
+        // to brick every request with a 400 blaming a field the caller never
+        // sent. An operator who wants the endpoint off turns the endpoint off.
+        properties.setMaxResults(0);
+
+        mvc.perform(post(PATH + "/search")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"query":"tariffs","modality":"NEWS"}"""))
+                .andExpect(status().isOk());
+
+        assertThat(source.received().get(0).maxResults())
+                .isEqualTo(OdeSearchController.DEFAULT_MAX_RESULTS);
+    }
 }

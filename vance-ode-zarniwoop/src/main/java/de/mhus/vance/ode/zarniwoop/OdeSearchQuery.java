@@ -15,6 +15,7 @@
  */
 package de.mhus.vance.ode.zarniwoop;
 
+import de.mhus.vance.ode.core.OdeCopy;
 import de.mhus.vance.ode.facet.OdeFacets;
 import de.mhus.vance.ode.inbound.OdeAuthService;
 import de.mhus.vance.ode.inbound.OdeCaller;
@@ -95,7 +96,7 @@ public record OdeSearchQuery(
             throw new IllegalArgumentException("modality is required");
         }
         tier = tier == null ? OdeSearchTier.NORMAL : tier;
-        expertParams = expertParams == null ? Map.of() : Map.copyOf(expertParams);
+        expertParams = OdeCopy.map(expertParams);
         facets = OdeFacets.normalize(facets);
         if (maxResults <= 0) {
             throw new IllegalArgumentException("maxResults must be > 0, was " + maxResults);

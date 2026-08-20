@@ -389,11 +389,26 @@ class OdeFeedControllerTest {
 
     @Test
     void facetValues_ofAnInlineFacetComeFromTheDeclaration() throws Exception {
+        // No parent means the top level — not the flat tree. Answering from the
+        // declaration is an optimisation; it does not change which question was
+        // asked, and a reader rendering descendants as direct children would
+        // show Singapore next to Asia rather than under it.
         mvc(source.withFacets(), properties)
                 .perform(get(PATH + "/facets").param("key", "origin-place"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].id").value("m49:142"));
+    }
+
+    @Test
+    void facetValues_ofAnInlineFacet_honourParent() throws Exception {
+        mvc(source.withFacets(), properties)
+                .perform(get(PATH + "/facets")
+                        .param("key", "origin-place")
+                        .param("parent", "m49:142"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].id").value("iso:SG"));
     }
 
     @Test

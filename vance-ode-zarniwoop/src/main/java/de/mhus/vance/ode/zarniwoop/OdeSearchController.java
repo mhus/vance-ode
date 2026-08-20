@@ -18,6 +18,7 @@ package de.mhus.vance.ode.zarniwoop;
 import de.mhus.vance.ode.facet.OdeFacet;
 import de.mhus.vance.ode.facet.OdeFacetValue;
 import de.mhus.vance.ode.facet.OdeFacets;
+import de.mhus.vance.ode.inbound.OdeBadRequestException;
 import de.mhus.vance.ode.inbound.OdeCaller;
 import de.mhus.vance.ode.inbound.OdeErrorResponse;
 import java.util.List;
@@ -98,7 +99,10 @@ public class OdeSearchController {
         if (!facet.lazyChildren()) {
             // Everything this facet has already travelled with the
             // capabilities; answering from there keeps one source of truth.
-            return facet.values();
+            // Still one level at a time: the reader asked for the children of
+            // `parent`, and handing back the whole flat tree would be a
+            // different answer to a different question.
+            return OdeFacets.childrenOf(facet.values(), parent);
         }
         return source.facetValues(key, parent);
     }
@@ -124,19 +128,27 @@ public class OdeSearchController {
             @Nullable OdeCaller caller) {
         OdeSearchCapabilities caps = source.capabilities();
 
+        // Validated here rather than left to the query record. Both would
+        // refuse it, but only this one can tell the caller it was their field:
+        // an exception out of the record reads as the source having failed, and
+        // this endpoint answers those with a 500 the caller backs off from.
+        if (body.query() == null || body.query().isBlank()) {
+            throw new OdeBadRequestException("query is required");
+        }
+
         OdeSearchModality modality = body.modality();
         if (modality == null) {
-            throw new IllegalArgumentException("modality is required");
+            throw new OdeBadRequestException("modality is required");
         }
         if (!caps.modalities().contains(modality)) {
-            throw new IllegalArgumentException(
+            throw new OdeBadRequestException(
                     "this source does not serve modality=" + modality
                             + "; it serves " + caps.modalities());
         }
 
         OdeSearchTier tier = body.tier() == null ? OdeSearchTier.NORMAL : body.tier();
         if (!caps.tiers().contains(tier)) {
-            throw new IllegalArgumentException(
+            throw new OdeBadRequestException(
                     "this source does not serve tier=" + tier
                             + "; it serves " + caps.tiers());
         }
@@ -198,11 +210,17 @@ public class OdeSearchController {
      * A malformed or undeclared request is the caller's problem and must not
      * read as a source failure — the caller backs off from 5xx, and a wrong
      * parameter is not something backing off would fix.
+     *
+     * <p>Only this endpoint's own refusals, which is why they carry their own
+     * type. Catching plain {@link IllegalArgumentException} here used to answer
+     * 400 for a source that had thrown one from inside {@link SearchSource#search},
+     * and the mistake ran the wrong way: the reader does not cool down on a 400,
+     * so a broken source kept being asked at full rate.
      */
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<OdeErrorResponse> onBadRequest(IllegalArgumentException e) {
+    @ExceptionHandler(OdeBadRequestException.class)
+    public ResponseEntity<OdeErrorResponse> onBadRequest(OdeBadRequestException e) {
         return ResponseEntity.badRequest()
-                .body(new OdeErrorResponse("bad_request", String.valueOf(e.getMessage())));
+                .body(new OdeErrorResponse("bad_request", OdeBadRequestException.describe(e)));
     }
 
     /**
@@ -219,7 +237,19 @@ public class OdeSearchController {
             root = root.getCause();
         }
         return ResponseEntity.badRequest()
-                .body(new OdeErrorResponse("bad_request", String.valueOf(root.getMessage())));
+                .body(new OdeErrorResponse("bad_request", OdeBadRequestException.describe(root)));
+    }
+
+    /**
+     * Anything the source itself threw. 500, deliberately: the reader is
+     * supposed to back off from this one, and the operator is supposed to see
+     * it in the log with a stack trace attached.
+     */
+    @ExceptionHandler(RuntimeException.class)
+    public ResponseEntity<OdeErrorResponse> onSourceFailure(RuntimeException e) {
+        log.error("Ode search: the source failed to answer", e);
+        return ResponseEntity.internalServerError()
+                .body(new OdeErrorResponse("source_failed", OdeBadRequestException.describe(e)));
     }
 
     // ── internals ────────────────────────────────────────────────────
@@ -228,10 +258,21 @@ public class OdeSearchController {
      * Two ceilings for two different reasons: the capability figure is what the
      * source can serve, the property is what the operator lets one request
      * cost.
+     *
+     * <p>A ceiling of zero or less is read as "unset", not as "serve nothing".
+     * The query record refuses a non-positive count, so a
+     * {@code max-results: 0} in either place used to brick every request with a
+     * 400 that blamed the caller's field — for a number the caller never sent.
+     * An operator who wants the endpoint off turns the endpoint off.
      */
     private int clampMaxResults(@Nullable Integer requested, OdeSearchCapabilities caps) {
         int asked = requested == null || requested <= 0 ? DEFAULT_MAX_RESULTS : requested;
-        return Math.min(asked, Math.min(caps.maxResults(), properties.getMaxResults()));
+        int ceiling = Math.min(positiveOr(caps.maxResults()), positiveOr(properties.getMaxResults()));
+        return Math.min(asked, ceiling);
+    }
+
+    private static int positiveOr(int configured) {
+        return configured > 0 ? configured : Integer.MAX_VALUE;
     }
 
     /**

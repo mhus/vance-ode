@@ -15,6 +15,7 @@
  */
 package de.mhus.vance.ode.centauri;
 
+import de.mhus.vance.ode.core.OdeCopy;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -91,8 +92,8 @@ public record OdeItem(
         if (cursor != null && cursor.isBlank()) {
             cursor = null;
         }
-        tags = tags == null ? List.of() : List.copyOf(tags);
-        extras = extras == null ? Map.of() : Map.copyOf(extras);
+        tags = OdeCopy.list(tags);
+        extras = OdeCopy.map(extras);
     }
 
     /**

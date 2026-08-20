@@ -294,4 +294,27 @@ class UrsaEventClientTest {
     void declaredEvents_reports_what_may_be_fired() {
         assertThat(client.declaredEvents()).containsExactly("translate-article");
     }
+
+    @Test
+    void a_space_in_a_path_segment_travels_percent_encoded() {
+        // URLEncoder does form encoding, where a space is '+'. In a path a '+'
+        // is a literal plus, so the brain used to look up a project called
+        // "giant+slingshot" and answer NOT_FOUND for one that exists.
+        VanceOdeProperties.EventBinding binding = new VanceOdeProperties.EventBinding();
+        binding.setToken("t");
+        binding.setProject("two words");
+        VanceOdeProperties properties = new VanceOdeProperties();
+        properties.setBaseUrl("http://127.0.0.1:" + server.getAddress().getPort());
+        properties.setTenant("acme");
+        properties.setProject("giant-slingshot");
+        properties.getEvents().put("elsewhere", binding);
+        responseBody = "{\"event\":\"elsewhere\"}";
+
+        new UrsaEventClient(new OdeHttpTransport(properties)).fire("elsewhere", null);
+
+        // The server decodes before it hands the path over, so what arrives is
+        // the space again — a '+' would have arrived as a literal '+'.
+        assertThat(received.getFirst().path())
+                .isEqualTo("/brain/acme/event/two words/elsewhere");
+    }
 }

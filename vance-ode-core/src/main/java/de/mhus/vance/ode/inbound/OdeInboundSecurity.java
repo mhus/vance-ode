@@ -58,8 +58,15 @@ public final class OdeInboundSecurity {
                 // would otherwise build "/ode/feed//**", which matches nothing
                 // while the endpoints stay mapped — a guard that fails open.
                 String base = endpoint.normalisedPath();
+                // An endpoint at the application root normalises to "" — there
+                // "" and "/**" are the whole surface, and the base pattern would
+                // match nothing on its own.
+                String[] patterns =
+                        base.isEmpty()
+                                ? new String[] {"/**"}
+                                : new String[] {base, base + "/**"};
                 registry.addInterceptor(new OdeAuthInterceptor(endpoint, authService))
-                        .addPathPatterns(base, base + "/**");
+                        .addPathPatterns(patterns);
             }
         };
     }
