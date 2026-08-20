@@ -56,7 +56,14 @@ public record OdeCapabilities(
          * fallback: what you decline here is not filtered elsewhere, it
          * simply takes you out of a request that asked for it.
          */
-        List<OdeFacet> facets) {
+        List<OdeFacet> facets,
+        /**
+         * Which {@link OdeItem#extras()} keys a reader should show, in the
+         * order it should show them — see {@link OdeExtraField}. Empty means
+         * none, which is the honest answer for a source whose extras are
+         * machine-facing.
+         */
+        List<OdeExtraField> extraFields) {
 
     public static final Duration DEFAULT_TTL = Duration.ofMinutes(30);
 
@@ -77,7 +84,26 @@ public record OdeCapabilities(
             Duration capabilitiesTtl) {
         this(selectorMode, selectorKinds, pushdownTextSearch, pushdownLanguage,
                 pushdownSince, supportsNewerDirection, carriesFullBody, maxPageSize,
-                signalsAccepted, carriesControlUrl, capabilitiesTtl, List.of());
+                signalsAccepted, carriesControlUrl, capabilitiesTtl, List.of(), List.of());
+    }
+
+    /** Capabilities with facets but no declared extras. */
+    public OdeCapabilities(
+            OdeSelectorMode selectorMode,
+            Set<OdeSelectorKind> selectorKinds,
+            boolean pushdownTextSearch,
+            boolean pushdownLanguage,
+            boolean pushdownSince,
+            boolean supportsNewerDirection,
+            boolean carriesFullBody,
+            int maxPageSize,
+            Set<OdeSignal> signalsAccepted,
+            boolean carriesControlUrl,
+            Duration capabilitiesTtl,
+            List<OdeFacet> facets) {
+        this(selectorMode, selectorKinds, pushdownTextSearch, pushdownLanguage,
+                pushdownSince, supportsNewerDirection, carriesFullBody, maxPageSize,
+                signalsAccepted, carriesControlUrl, capabilitiesTtl, facets, List.of());
     }
 
     public OdeCapabilities {
@@ -87,6 +113,7 @@ public record OdeCapabilities(
         selectorKinds = selectorKinds == null ? Set.of() : Set.copyOf(selectorKinds);
         signalsAccepted = signalsAccepted == null ? Set.of() : Set.copyOf(signalsAccepted);
         facets = facets == null ? List.of() : List.copyOf(facets);
+        extraFields = extraFields == null ? List.of() : List.copyOf(extraFields);
         if (maxPageSize <= 0) {
             maxPageSize = DEFAULT_MAX_PAGE_SIZE;
         }

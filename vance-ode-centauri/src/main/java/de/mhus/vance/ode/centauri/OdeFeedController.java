@@ -175,13 +175,13 @@ public class OdeFeedController {
      * and the click.
      */
     @GetMapping("/item/{itemId}")
-    public ResponseEntity<OdeItemBody> item(
+    public ResponseEntity<OdeItem> item(
             @PathVariable String itemId,
             @RequestHeader(name = OdeFeedHeaders.READER, required = false)
             @Nullable String reader,
             @RequestAttribute(name = OdeCaller.ATTRIBUTE, required = false)
             @Nullable OdeCaller caller) {
-        return source.body(itemId, reader, caller)
+        return source.item(itemId, reader, caller)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }

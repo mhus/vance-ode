@@ -31,6 +31,7 @@ import de.mhus.vance.ode.inbound.OdeCaller;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
@@ -536,10 +537,17 @@ class OdeFeedControllerTest {
         }
 
         @Override
-        public Optional<OdeItemBody> body(String itemId, @Nullable String reader) {
-            return "i1".equals(itemId)
-                    ? Optional.of(new OdeItemBody("full text of i1"))
-                    : Optional.empty();
+        public Optional<OdeItem> item(String itemId, @Nullable String reader) {
+            if (!"i1".equals(itemId)) {
+                return Optional.empty();
+            }
+            // The detail is the page entry with what the listing left out —
+            // here the body and one extra the teaser did not carry.
+            return Optional.of(new OdeItem(
+                    "i1", null, Instant.parse("2026-08-19T10:00:00Z"), "First",
+                    "https://x.test/1", "teaser", "full text of i1",
+                    "A. Author", "en", null, null, List.of("tag"),
+                    Map.of("originPlace", "Germany")));
         }
 
         @Override
@@ -572,10 +580,13 @@ class OdeFeedControllerTest {
         }
 
         @Override
-        public Optional<OdeItemBody> body(
+        public Optional<OdeItem> item(
                 String itemId, @Nullable String reader, @Nullable OdeCaller caller) {
             this.bodyCaller = caller == null ? null : caller.id();
-            return Optional.of(new OdeItemBody("full text of " + itemId));
+            return Optional.of(new OdeItem(
+                    itemId, null, Instant.parse("2026-08-19T10:00:00Z"), "First",
+                    "https://x.test/1", null, "full text of " + itemId,
+                    null, null, null, null, List.of(), Map.of()));
         }
 
         @Override

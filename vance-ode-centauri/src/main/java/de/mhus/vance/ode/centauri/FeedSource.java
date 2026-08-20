@@ -101,26 +101,39 @@ public interface FeedSource {
     OdeItemPage items(OdeItemQuery query);
 
     /**
-     * The full text of one entry. Only asked when
-     * {@link OdeCapabilities#carriesFullBody()} is false; return
-     * {@link Optional#empty()} for an entry you do not know, which becomes a
-     * 404.
+     * One entry in full.
+     *
+     * <p><b>The same type the page returns</b>, and that is the whole idea: a
+     * page entry is a teaser — what is cheap to produce twenty times — and
+     * this is the entry itself, with the body filled in and whatever else
+     * costs a lookup ({@code extras}, a longer summary, an image the listing
+     * omitted). The reader replaces what it has rather than merging two
+     * shapes, and there is one contract to learn instead of two.
+     *
+     * <p>It also means you are free to answer with exactly what the page
+     * carried: for a source whose listing is already complete
+     * ({@link OdeCapabilities#carriesFullBody()}) that is the correct answer,
+     * not a shortcoming.
+     *
+     * <p>{@link Optional#empty()} for an entry you do not know — which becomes
+     * a 404, and is the normal answer for one that has aged out between the
+     * page and the click.
      */
-    default Optional<OdeItemBody> body(String itemId, @Nullable String reader) {
+    default Optional<OdeItem> item(String itemId, @Nullable String reader) {
         return Optional.empty();
     }
 
     /**
-     * The same fetch, told whose token asked for it.
+     * The same lookup, told whose token asked for it.
      *
      * <p>This is the one the endpoint calls; the default drops the caller and
      * delegates, so a source that does not care implements
-     * {@link #body(String, String)} and never sees this. Override it when a full
-     * text is licensed rather than public.
+     * {@link #item(String, String)} and never sees this. Override it when the
+     * full entry is licensed rather than public.
      */
-    default Optional<OdeItemBody> body(
+    default Optional<OdeItem> item(
             String itemId, @Nullable String reader, @Nullable OdeCaller caller) {
-        return body(itemId, reader);
+        return item(itemId, reader);
     }
 
     /**
