@@ -7,7 +7,9 @@
     <version>0.1.0-SNAPSHOT</version>
     <name>vance-ode</name>
     <description>Spring Boot library that connects foreign software to Vancetope. One module per Vancetope subsystem the application takes part in — a consumer depends on the contracts it uses and inherits nothing else.</description>
+    <url>https://github.com/mhus/vance-ode</url>
     <packaging>pom</packaging>
+    <inceptionYear>2026</inceptionYear>
 
     <!--
         Declared here rather than only in LICENSE so it travels with the
@@ -21,6 +23,27 @@
             <distribution>repo</distribution>
         </license>
     </licenses>
+
+    <!--
+        url, scm and developers are not decoration: Maven Central rejects a
+        deployment that omits any of them. They are inherited by the modules,
+        so this block appears once.
+    -->
+    <scm>
+        <url>https://github.com/mhus/vance-ode</url>
+        <connection>scm:git:https://github.com/mhus/vance-ode.git</connection>
+        <developerConnection>scm:git:git@github.com:mhus/vance-ode.git</developerConnection>
+        <tag>HEAD</tag>
+    </scm>
+
+    <developers>
+        <developer>
+            <id>mhu</id>
+            <name>Mike Hummel</name>
+            <email>mh@mhus.de</email>
+            <url>http://www.mhus.de</url>
+        </developer>
+    </developers>
 
     <modules>
         <module>vance-ode-core</module>
@@ -127,5 +150,101 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!--
+            Everything Maven Central demands beyond a normal build, in one
+            profile that the day-to-day build never activates: sources jar,
+            javadoc jar, GPG signature, and the upload to the Central Portal.
+            Driven by `wb ode release` — see readme/release.md.
+
+            One profile rather than the deploy/release pair the other mhus
+            repos use: there is no snapshot lane here (consumers build ode
+            from source or take a release), so splitting "attach artifacts"
+            from "sign them" would only give us a combination we never run.
+        -->
+        <profile>
+            <id>release</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-source-plugin</artifactId>
+                        <version>3.3.1</version>
+                        <executions>
+                            <execution>
+                                <id>attach-sources</id>
+                                <goals>
+                                    <goal>jar-no-fork</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-javadoc-plugin</artifactId>
+                        <version>3.10.1</version>
+                        <configuration>
+                            <!--
+                                Central requires the javadoc jar to exist, not
+                                to be flawless. A doclint complaint in a
+                                comment must not be able to abort a release
+                                that is otherwise ready to go out.
+                            -->
+                            <failOnError>false</failOnError>
+                            <doclint>none</doclint>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>attach-javadocs</id>
+                                <goals>
+                                    <goal>jar</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-gpg-plugin</artifactId>
+                        <version>3.2.7</version>
+                        <executions>
+                            <execution>
+                                <id>sign-artifacts</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>sign</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <!--
+                        Replaces distributionManagement entirely: with
+                        extensions=true the plugin takes over the deploy phase
+                        and uploads a bundle to the Central Portal. Credentials
+                        come from the <server id=central> entry in
+                        ~/.m2/settings.xml (portal user token, not the account
+                        password).
+
+                        autoPublish=true so a release does not sit in the
+                        portal waiting for a click; waitUntil=validated returns
+                        as soon as Central has accepted the bundle — the
+                        publishing itself then runs on their side, and blocking
+                        the terminal for it buys nothing we would act on.
+                    -->
+                    <plugin>
+                        <groupId>org.sonatype.central</groupId>
+                        <artifactId>central-publishing-maven-plugin</artifactId>
+                        <version>0.8.0</version>
+                        <extensions>true</extensions>
+                        <configuration>
+                            <publishingServerId>central</publishingServerId>
+                            <autoPublish>true</autoPublish>
+                            <waitUntil>validated</waitUntil>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 
 </project>
