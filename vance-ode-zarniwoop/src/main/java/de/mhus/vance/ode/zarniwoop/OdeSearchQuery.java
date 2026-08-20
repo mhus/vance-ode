@@ -15,8 +15,10 @@
  */
 package de.mhus.vance.ode.zarniwoop;
 
+import de.mhus.vance.ode.facet.OdeFacets;
 import de.mhus.vance.ode.inbound.OdeAuthService;
 import de.mhus.vance.ode.inbound.OdeCaller;
+import java.util.List;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
@@ -61,7 +63,29 @@ public record OdeSearchQuery(
         int maxResults,
         @Nullable String locale,
         Map<String, Object> expertParams,
+        /**
+         * Facet selection, {@code key -> values} — conjunction across keys,
+         * disjunction within one. Only keys you declared in
+         * {@link OdeSearchCapabilities#facets()} arrive here, so there is
+         * nothing to validate: what is in the map, you promised to answer.
+         *
+         * <p>A hierarchical facet hands you one node ({@code m49:142});
+         * resolving containment is yours, because you hold the hierarchy.
+         */
+        Map<String, List<String>> facets,
         @Nullable OdeCaller caller) {
+
+    /** The same query without facets. */
+    public OdeSearchQuery(
+            String query,
+            OdeSearchModality modality,
+            OdeSearchTier tier,
+            int maxResults,
+            @Nullable String locale,
+            Map<String, Object> expertParams,
+            @Nullable OdeCaller caller) {
+        this(query, modality, tier, maxResults, locale, expertParams, Map.of(), caller);
+    }
 
     public OdeSearchQuery {
         if (query == null || query.isBlank()) {
@@ -72,6 +96,7 @@ public record OdeSearchQuery(
         }
         tier = tier == null ? OdeSearchTier.NORMAL : tier;
         expertParams = expertParams == null ? Map.of() : Map.copyOf(expertParams);
+        facets = OdeFacets.normalize(facets);
         if (maxResults <= 0) {
             throw new IllegalArgumentException("maxResults must be > 0, was " + maxResults);
         }

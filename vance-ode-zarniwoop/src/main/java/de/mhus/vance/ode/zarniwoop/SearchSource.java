@@ -16,6 +16,7 @@
 package de.mhus.vance.ode.zarniwoop;
 
 import de.mhus.vance.ode.inbound.OdeCaller;
+import java.util.List;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 
@@ -55,6 +56,20 @@ public interface SearchSource {
      * reach out over a network.
      */
     OdeSearchCapabilities capabilities();
+
+    /**
+     * One level of a facet's value tree, for a facet whose taxonomy is too
+     * large to travel inline (see
+     * {@link de.mhus.vance.ode.facet.OdeFacet#lazyChildren()}).
+     *
+     * <p>{@code parentId} null means the top level. The default answers
+     * nothing, which is right for every source that ships its values with its
+     * capabilities — and you are only asked about a facet that said otherwise.
+     */
+    default List<de.mhus.vance.ode.facet.OdeFacetValue> facetValues(
+            String key, @Nullable String parentId) {
+        return List.of();
+    }
 
     /**
      * Run one search.

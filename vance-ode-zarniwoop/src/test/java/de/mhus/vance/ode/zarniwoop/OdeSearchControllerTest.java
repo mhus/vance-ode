@@ -23,6 +23,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import de.mhus.vance.ode.facet.OdeFacet;
+import de.mhus.vance.ode.facet.OdeFacetValue;
 import de.mhus.vance.ode.inbound.OdeAuthDecision;
 import de.mhus.vance.ode.inbound.OdeAuthInterceptor;
 import de.mhus.vance.ode.inbound.OdeAuthService;
@@ -514,4 +516,74 @@ class OdeSearchControllerTest {
                     new OdeContentBody("application/pdf", new byte[]{1, 2, 3}));
         }
     }
+    // ── facets ───────────────────────────────────────────────────────
+
+    private static OdeSearchCapabilities capsWithPlaceFacet(boolean lazy) {
+        return new OdeSearchCapabilities(
+                Set.of(OdeSearchModality.NEWS, OdeSearchModality.WEB),
+                Set.of(OdeSearchDomain.NEWS),
+                Set.of(OdeSearchTier.NORMAL),
+                25, Set.of("desk"), false, java.time.Duration.ofMinutes(30),
+                List.of(new OdeFacet("origin-place", "Origin", true,
+                        lazy ? List.of() : List.of(
+                                OdeFacetValue.of("m49:142", "Asia"),
+                                new OdeFacetValue("iso:SG", "Singapore", "m49:142")),
+                        lazy)));
+    }
+
+    @Test
+    void facets_travelWithTheCapabilities() throws Exception {
+        source.withCapabilities(capsWithPlaceFacet(false));
+
+        mvc.perform(get(PATH + "/capabilities"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.facets[0].key").value("origin-place"))
+                .andExpect(jsonPath("$.facets[0].values[1].parentId").value("m49:142"));
+    }
+
+    @Test
+    void search_handsADeclaredFacetToTheSource() throws Exception {
+        source.withCapabilities(capsWithPlaceFacet(false));
+
+        mvc.perform(post(PATH + "/search")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"query":"tariffs","modality":"NEWS",
+                                 "facets":{"origin-place":["m49:142"]}}"""))
+                .andExpect(status().isOk());
+
+        assertThat(source.received().get(0).facets())
+                .containsEntry("origin-place", List.of("m49:142"));
+    }
+
+    @Test
+    void search_dropsAFacetThisSourceNeverDeclared() throws Exception {
+        mvc.perform(post(PATH + "/search")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"query":"tariffs","modality":"NEWS",
+                                 "facets":{"origin-place":["m49:142"]}}"""))
+                .andExpect(status().isOk());
+
+        assertThat(source.received().get(0).facets()).isEmpty();
+    }
+
+    @Test
+    void facetValues_ofALazyFacetAreAskedOfTheSource() throws Exception {
+        source.withCapabilities(capsWithPlaceFacet(true));
+
+        mvc.perform(get(PATH + "/facets")
+                        .param("key", "origin-place")
+                        .param("parent", "m49:142"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value("iso:SG"));
+    }
+
+    @Test
+    void facetValues_ofAnUndeclaredKeyAreEmptyRatherThanAnError() throws Exception {
+        mvc.perform(get(PATH + "/facets").param("key", "origin-place"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+    }
+
 }

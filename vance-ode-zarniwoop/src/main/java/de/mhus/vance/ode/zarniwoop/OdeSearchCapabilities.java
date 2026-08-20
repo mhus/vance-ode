@@ -15,7 +15,9 @@
  */
 package de.mhus.vance.ode.zarniwoop;
 
+import de.mhus.vance.ode.facet.OdeFacet;
 import java.time.Duration;
+import java.util.List;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 
@@ -59,7 +61,31 @@ public record OdeSearchCapabilities(
         int maxResults,
         Set<String> expertParams,
         boolean servesContent,
-        @Nullable Duration cacheTtl) {
+        @Nullable Duration cacheTtl,
+        /**
+         * Dimensions this source can be filtered by — see {@link OdeFacet}.
+         * Empty is the normal answer.
+         *
+         * <p>Unlike {@link #expertParams()}, which names free-form knobs a
+         * protocol may or may not honour, a facet is structured and binding:
+         * the reader draws a picker from the values you declare here, and a
+         * key you did not declare takes you out of a request that selected
+         * it rather than being ignored.
+         */
+        List<OdeFacet> facets) {
+
+    /** The same declaration without facets — the shape that predates them. */
+    public OdeSearchCapabilities(
+            Set<OdeSearchModality> modalities,
+            Set<OdeSearchDomain> domains,
+            Set<OdeSearchTier> tiers,
+            int maxResults,
+            Set<String> expertParams,
+            boolean servesContent,
+            @Nullable Duration cacheTtl) {
+        this(modalities, domains, tiers, maxResults, expertParams, servesContent,
+                cacheTtl, List.of());
+    }
 
     public OdeSearchCapabilities {
         modalities = modalities == null ? Set.of() : Set.copyOf(modalities);
@@ -76,6 +102,7 @@ public record OdeSearchCapabilities(
                 ? Set.of(OdeSearchTier.NORMAL)
                 : Set.copyOf(tiers);
         expertParams = expertParams == null ? Set.of() : Set.copyOf(expertParams);
+        facets = facets == null ? List.of() : List.copyOf(facets);
         if (maxResults <= 0) {
             maxResults = 20;
         }
@@ -88,6 +115,6 @@ public record OdeSearchCapabilities(
     public static OdeSearchCapabilities of(OdeSearchModality modality, int maxResults) {
         return new OdeSearchCapabilities(
                 Set.of(modality), Set.of(OdeSearchDomain.GENERAL),
-                Set.of(OdeSearchTier.NORMAL), maxResults, Set.of(), false, null);
+                Set.of(OdeSearchTier.NORMAL), maxResults, Set.of(), false, null, List.of());
     }
 }

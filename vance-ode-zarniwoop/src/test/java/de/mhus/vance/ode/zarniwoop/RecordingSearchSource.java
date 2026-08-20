@@ -56,6 +56,12 @@ final class RecordingSearchSource implements SearchSource {
         return this;
     }
 
+    @Override
+    public List<de.mhus.vance.ode.facet.OdeFacetValue> facetValues(
+            String key, @Nullable String parentId) {
+        return List.of(new de.mhus.vance.ode.facet.OdeFacetValue("iso:SG", "Singapore", parentId));
+    }
+
     RecordingSearchSource failingWith(RuntimeException e) {
         this.failure = e;
         return this;

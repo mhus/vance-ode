@@ -15,6 +15,7 @@
  */
 package de.mhus.vance.ode.zarniwoop;
 
+import java.util.List;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
@@ -44,9 +45,11 @@ public record OdeSearchRequestBody(
         @Nullable OdeSearchTier tier,
         @Nullable Integer maxResults,
         @Nullable String locale,
-        Map<String, Object> expertParams) {
+        Map<String, Object> expertParams,
+        @Nullable Map<String, List<String>> facets) {
 
     public OdeSearchRequestBody {
         expertParams = expertParams == null ? Map.of() : Map.copyOf(expertParams);
+        facets = facets == null ? Map.of() : Map.copyOf(facets);
     }
 }

@@ -111,6 +111,30 @@ public final class OdeFacets {
         return Map.copyOf(out);
     }
 
+    /**
+     * Keep only the keys the source declared, dropping the rest with a log
+     * line.
+     *
+     * <p>The GET side reaches the same result through {@link #parse}; this is
+     * for the POST side, where the selection arrives as a map in the body.
+     */
+    public static Map<String, List<String>> restrictTo(
+            @Nullable Map<String, List<String>> selection, Set<String> declared) {
+        Map<String, List<String>> normalized = normalize(selection);
+        if (normalized.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, List<String>> out = new LinkedHashMap<>();
+        for (Map.Entry<String, List<String>> e : normalized.entrySet()) {
+            if (declared.contains(e.getKey())) {
+                out.put(e.getKey(), e.getValue());
+            } else {
+                log.debug("Ignoring facet '{}' — not declared by this source", e.getKey());
+            }
+        }
+        return Map.copyOf(out);
+    }
+
     /** The keys a list of declared facets covers. */
     public static Set<String> keysOf(@Nullable List<OdeFacet> facets) {
         if (facets == null || facets.isEmpty()) {

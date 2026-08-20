@@ -15,8 +15,12 @@
  */
 package de.mhus.vance.ode.zarniwoop;
 
+import de.mhus.vance.ode.facet.OdeFacet;
+import de.mhus.vance.ode.facet.OdeFacetValue;
+import de.mhus.vance.ode.facet.OdeFacets;
 import de.mhus.vance.ode.inbound.OdeCaller;
 import de.mhus.vance.ode.inbound.OdeErrorResponse;
+import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -31,6 +35,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -70,6 +75,32 @@ public class OdeSearchController {
     @GetMapping("/capabilities")
     public OdeSearchCapabilities capabilities() {
         return source.capabilities();
+    }
+
+    /**
+     * One level of a facet's value tree, for a facet too large to travel
+     * inline with the capabilities.
+     *
+     * <p>{@code parent} absent means the top level. An undeclared key answers
+     * empty rather than 404: a reader holding a stale capabilities response
+     * should find the facet gone, not the endpoint broken.
+     */
+    @GetMapping("/facets")
+    public List<OdeFacetValue> facetValues(
+            @RequestParam String key,
+            @RequestParam(required = false) @Nullable String parent) {
+
+        OdeFacet facet = OdeFacets.find(source.capabilities().facets(), key);
+        if (facet == null) {
+            log.debug("Facet values requested for undeclared key '{}' — empty", key);
+            return List.of();
+        }
+        if (!facet.lazyChildren()) {
+            // Everything this facet has already travelled with the
+            // capabilities; answering from there keeps one source of truth.
+            return facet.values();
+        }
+        return source.facetValues(key, parent);
     }
 
     /**
@@ -115,6 +146,14 @@ public class OdeSearchController {
         Map<String, Object> expertParams =
                 tier == OdeSearchTier.EXPERT ? body.expertParams() : Map.of();
 
+        // Narrowed to what this source declared, for the same reason the
+        // modality is checked above: a facet it never claimed is a question
+        // it cannot answer. Dropped and logged rather than refused — a reader
+        // may be newer than this end, and one filter it can live without
+        // should not turn into a broken endpoint.
+        Map<String, List<String>> facets =
+                OdeFacets.restrictTo(body.facets(), OdeFacets.keysOf(caps.facets()));
+
         OdeSearchQuery query = new OdeSearchQuery(
                 body.query(),
                 modality,
@@ -122,6 +161,7 @@ public class OdeSearchController {
                 clampMaxResults(body.maxResults(), caps),
                 body.locale(),
                 expertParams,
+                facets,
                 caller);
 
         OdeSearchResponse response = source.search(query);
