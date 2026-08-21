@@ -21,9 +21,9 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -58,12 +58,14 @@ import org.springframework.web.bind.annotation.RestController;
 @Slf4j
 public class OdeKitController {
 
-    private final Map<String, KitSource> byId;
+    private final SortedMap<String, KitSource> byId;
     private final VanceOdeKitProperties properties;
 
     public OdeKitController(List<KitSource> sources, VanceOdeKitProperties properties) {
         this.properties = properties;
-        Map<String, KitSource> map = new LinkedHashMap<>();
+        // Sorted by id, not bean-discovery order: that order is not stable
+        // between runs, and it decides the order of the capabilities list.
+        SortedMap<String, KitSource> map = new TreeMap<>();
         for (KitSource source : sources) {
             String id = source.declare().id();
             KitSource clash = map.put(id, source);
@@ -76,7 +78,7 @@ public class OdeKitController {
                         + source.getClass().getName());
             }
         }
-        this.byId = Map.copyOf(map);
+        this.byId = java.util.Collections.unmodifiableSortedMap(map);
         log.info("Ode kit endpoint serving {} kit(s): {}", byId.size(), byId.keySet());
     }
 

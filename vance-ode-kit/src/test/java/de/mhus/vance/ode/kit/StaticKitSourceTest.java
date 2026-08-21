@@ -28,7 +28,8 @@ import org.junit.jupiter.api.io.TempDir;
 class StaticKitSourceTest {
 
     private static final OdeKitBuildRequest REQUEST =
-            new OdeKitBuildRequest("acme-crm", "acme-prod", "acme", "sales", "https://host.example");
+            new OdeKitBuildRequest("acme-crm", "acme-prod", "acme", "sales",
+                    "https://host.example", java.util.Map.of());
 
     @Test
     void fromClasspath_findsThePackagedKit() {

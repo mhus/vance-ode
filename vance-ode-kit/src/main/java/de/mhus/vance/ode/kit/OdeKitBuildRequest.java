@@ -15,6 +15,7 @@
  */
 package de.mhus.vance.ode.kit;
 
+import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -40,10 +41,35 @@ import org.jspecify.annotations.Nullable;
  *        because a service behind a reverse proxy does not reliably know its
  *        own. Note it is <b>not</b> ours to answer with: the caller substitutes
  *        the value it sent, so a different address here would go nowhere.
+ * @param params what the caller's operator asked this application for —
+ *        „the German variant with the invoicing module". Free-form and
+ *        open-ended, unlike the fields above: those say who and where and
+ *        are a closed set, this one says <i>what</i>, and only you know
+ *        your own options. Never null; empty when nothing was configured.
+ *
+ *        <p>Two things follow. Ignore keys you do not know rather than
+ *        refusing — the caller cannot know your schema, and a refusal
+ *        costs the whole install. And if these change what you build,
+ *        make sure your {@link OdeKitDeclaration#revision()} does not
+ *        pretend otherwise: it is declared by the parameter-free
+ *        capabilities call, so the caller treats a params change as its
+ *        own reason to refetch and does not expect you to encode it.
  */
 public record OdeKitBuildRequest(
         String kit,
         @Nullable String instance,
         String tenant,
         @Nullable String project,
-        @Nullable String accessUrl) {}
+        @Nullable String accessUrl,
+        Map<String, Object> params) {
+
+    public OdeKitBuildRequest {
+        params = params == null ? Map.of() : Map.copyOf(params);
+    }
+
+    /** One param as a string, or {@code fallback} when absent or of another type. */
+    public String param(String key, String fallback) {
+        Object value = params.get(key);
+        return value instanceof String s && !s.isBlank() ? s : fallback;
+    }
+}

@@ -133,6 +133,33 @@ class OdeKitControllerTest {
     }
 
     @Test
+    void build_passesParamsThrough() throws Exception {
+        mvc.perform(post(PATH + "/build")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"kit":"acme-crm","tenant":"acme",
+                                 "params":{"lang":"de","modules":["crm","invoicing"]}}"""))
+                .andExpect(status().isOk());
+
+        OdeKitBuildRequest request = source.requests.getFirst();
+        assertThat(request.param("lang", "en")).isEqualTo("de");
+        assertThat(request.params()).containsKey("modules");
+    }
+
+    @Test
+    void build_withoutParams_getsAnEmptyMapNotNull() throws Exception {
+        mvc.perform(post(PATH + "/build")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"kit":"acme-crm","tenant":"acme"}"""))
+                .andExpect(status().isOk());
+
+        // An implementation reading params should never need a null check.
+        assertThat(source.requests.getFirst().params()).isEmpty();
+        assertThat(source.requests.getFirst().param("lang", "en")).isEqualTo("en");
+    }
+
+    @Test
     void build_leavesPlaceholdersAlone() throws Exception {
         byte[] archive = mvc.perform(post(PATH + "/build")
                         .contentType(MediaType.APPLICATION_JSON)
