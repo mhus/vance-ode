@@ -1,0 +1,4 @@
+name: acme-crm
+description: CRM tools
+render:
+  - tools/crm.yaml

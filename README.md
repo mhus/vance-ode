@@ -21,6 +21,7 @@ One module per Vancetope subsystem the application takes part in.
 | `vance-ode-ursa` | events / triggers | outbound | **implemented** |
 | `vance-ode-centauri` | feed streams | inbound | **implemented** |
 | `vance-ode-zarniwoop` | research / search | inbound | **implemented** |
+| `vance-ode-kit` | kit provisioning | inbound | **implemented** |
 
 ### Why by subsystem and not by direction
 
@@ -368,6 +369,122 @@ fails deserialisation when the JSON field for a primitive is missing, and it doe
 so **before any handler runs** — the caller gets a bodiless 400 for a field the
 contract calls optional, with nothing to read. Anything optional added to an
 inbound body later follows the same rule.
+
+## Kit — being installed
+
+The third inbound contract, and the one that is about *this application* rather
+than about its content. A **kit** is the bundle of documents, tool definitions,
+manuals and settings that teaches Vancetope how to work with your software.
+Written by hand it drifts from the API it describes; served from here it is
+whatever the running version says it is.
+
+```xml
+<dependency>
+    <groupId>de.mhus.vance.ode</groupId>
+    <artifactId>vance-ode-kit</artifactId>
+    <version>0.2.0</version>
+</dependency>
+```
+
+The short way — the kit is a directory of files in your jar:
+
+```java
+@Bean
+KitSource crmKit() {
+    return StaticKitSource.fromClasspath("acme-crm", "kits/acme-crm");
+}
+```
+
+The long way, when the *file list* differs per project — a licensed module, one
+tool per configured object type. Neither end changes; a reader cannot tell which
+of the two it is talking to:
+
+```java
+@Component
+class CrmKitSource implements KitSource {
+
+    @Override
+    public OdeKitDeclaration declare() {
+        return new OdeKitDeclaration("acme-crm", "1.4.0", index.revision(), "CRM tools");
+    }
+
+    @Override
+    public OdeKitBundle build(OdeKitBuildRequest request) {
+        var files = baseFiles();
+        if (billing.enabledFor(request.tenant())) {
+            files.put("tools/invoice.yaml", invoiceTool());
+        }
+        return new OdeKitBundle(files);
+    }
+}
+```
+
+```yaml
+vance:
+  ode:
+    kit:
+      path: /kit               # sub-path, not the whole address — see below
+      api-key: ${KIT_KEY}      # empty means no check; a kit carries tool definitions
+      max-bundle-bytes: 33554432
+```
+
+### The contract
+
+| Endpoint | Purpose |
+|---|---|
+| `GET {path}/capabilities` | which kits are on offer, with a revision each; cheap, builds nothing |
+| `POST {path}/build` | assemble one kit, answered as a zip |
+
+`build` is a POST although it changes nothing here: the request carries a
+structured body, and a url is where caches and access logs keep things — the
+wrong place for the name of a tenant.
+
+### Placeholders are filled by the reader
+
+Put `{{ accessUrl }}` in a file, list that file under `render:` in your
+`kit.yaml`, and Vancetope substitutes it on arrival. Available:
+`accessUrl`, `tenant`, `project`, `instance`.
+
+Do **not** substitute them yourself. The request tells you the address the caller
+reached you at — useful, because behind a reverse proxy you do not reliably know
+it — but the caller fills in the value *it sent*. A host that answered with a
+different address could point the kit somewhere else, which is why the direction
+is this way round.
+
+### Three assurances
+
+1. **`declare()` is cheap and builds nothing.** A reader checks on a schedule
+   whether anything changed. If answering that costs what an install costs, the
+   check has to be made rare, and then changes arrive late.
+2. **`build` answers in seconds.** It runs inside an install someone is waiting
+   on.
+3. **The revision moves exactly when the bytes move.** Standing still while the
+   content changes means the change is never picked up; moving while the content
+   stands still means every check refetches. A content hash is the safe answer —
+   `StaticKitSource` computes one; a build id works if it obeys the same rule.
+
+And one about failure: **serving no kit is not an exception.** Declare nothing,
+or publish no bean. Throwing marks this application as broken and makes the
+reader back off — right for a real fault, wrong for "nothing configured here".
+
+### What the request does not carry
+
+No person. It names the installation, the tenant and the project — where the kit
+is going, so a failure can be found in your log — and not who triggered it.
+`instance` is a label the caller chose for itself: fine for a log, **not** an
+authorisation input. Authorise on the credential.
+
+No signature either. You write the kit and you deliver it, so a signature would
+prove nothing the transport and the credential do not already say; Vancetope
+treats these sources as unsigned by default.
+
+### Why `path` is a sub-path
+
+Unlike the other inbound modules, the reader configures your **application** base
+url and sends it back as `accessUrl` so a kit can put it where it needs one. If
+the reader's url already contained `/kit`, `accessUrl` would be the address of
+this endpoint rather than of the application — and a template cannot strip a
+suffix. So the reader knows the root, this module owns the sub-path.
 
 ## Facets — being filtered
 

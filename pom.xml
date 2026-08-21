@@ -51,6 +51,7 @@
         <module>vance-ode-centauri</module>
         <module>vance-ode-zarniwoop</module>
         <module>vance-ode-jaglan</module>
+        <module>vance-ode-kit</module>
     </modules>
 
     <properties>
