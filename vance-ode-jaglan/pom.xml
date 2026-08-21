@@ -1,0 +1,71 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>de.mhus.vance.ode</groupId>
+        <artifactId>vance-ode</artifactId>
+        <version>0.2.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>vance-ode-jaglan</artifactId>
+    <name>vance-ode-jaglan</name>
+    <description>Serves this application's files to Vancetope's Jaglan mount layer, so they appear under a project path and can be read with the ordinary document tools. Implement one interface, get the REST contract. Inbound like vance-ode-centauri — Vancetope calls in — but this one streams bytes rather than returning JSON pages.</description>
+    <packaging>jar</packaging>
+
+    <dependencies>
+        <!--
+            Core for de.mhus.vance.ode.inbound alone — the shared-secret guard
+            and the error body. Nothing outbound comes with it: core's outbound
+            auto-configuration is conditional on `vance.ode.base-url`, so a file
+            source that sets no brain URL gets no client and no token.
+        -->
+        <dependency>
+            <groupId>de.mhus.vance.ode</groupId>
+            <artifactId>vance-ode-core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-autoconfigure</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-configuration-processor</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!--
+            spring-webmvc rather than spring-boot-starter-web, same reasoning as
+            vance-ode-centauri: an application that already serves HTTP has
+            picked its container and its logging.
+        -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-webmvc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.servlet</groupId>
+            <artifactId>jakarta.servlet-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+</project>

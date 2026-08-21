@@ -50,6 +50,7 @@
         <module>vance-ode-ursa</module>
         <module>vance-ode-centauri</module>
         <module>vance-ode-zarniwoop</module>
+        <module>vance-ode-jaglan</module>
     </modules>
 
     <properties>
