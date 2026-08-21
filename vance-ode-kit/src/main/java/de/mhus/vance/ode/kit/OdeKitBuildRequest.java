@@ -41,6 +41,12 @@ import org.jspecify.annotations.Nullable;
  *        because a service behind a reverse proxy does not reliably know its
  *        own. Note it is <b>not</b> ours to answer with: the caller substitutes
  *        the value it sent, so a different address here would go nowhere.
+ * @param installId which installation of this kit the caller is
+ *        refreshing, or null when it has never installed it. Only a
+ *        previous installation can be named — the id of a new one is
+ *        derived from the descriptor the caller is about to download — so
+ *        an absent value means „first contact", which is the useful half
+ *        of the signal.
  * @param params what the caller's operator asked this application for —
  *        „the German variant with the invoicing module". Free-form and
  *        open-ended, unlike the fields above: those say who and where and
@@ -61,6 +67,7 @@ public record OdeKitBuildRequest(
         String tenant,
         @Nullable String project,
         @Nullable String accessUrl,
+        @Nullable String installId,
         Map<String, Object> params) {
 
     public OdeKitBuildRequest {

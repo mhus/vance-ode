@@ -133,6 +133,28 @@ class OdeKitControllerTest {
     }
 
     @Test
+    void build_absentInstallId_meansFirstContact() throws Exception {
+        mvc.perform(post(PATH + "/build")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"kit":"acme-crm","tenant":"acme"}"""))
+                .andExpect(status().isOk());
+
+        assertThat(source.requests.getFirst().installId()).isNull();
+    }
+
+    @Test
+    void build_installId_isPassedThrough() throws Exception {
+        mvc.perform(post(PATH + "/build")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"kit":"acme-crm","tenant":"acme","installId":"k-42"}"""))
+                .andExpect(status().isOk());
+
+        assertThat(source.requests.getFirst().installId()).isEqualTo("k-42");
+    }
+
+    @Test
     void build_passesParamsThrough() throws Exception {
         mvc.perform(post(PATH + "/build")
                         .contentType(MediaType.APPLICATION_JSON)

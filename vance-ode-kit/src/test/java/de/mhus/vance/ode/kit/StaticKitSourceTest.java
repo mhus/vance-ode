@@ -29,7 +29,7 @@ class StaticKitSourceTest {
 
     private static final OdeKitBuildRequest REQUEST =
             new OdeKitBuildRequest("acme-crm", "acme-prod", "acme", "sales",
-                    "https://host.example", java.util.Map.of());
+                    "https://host.example", null, java.util.Map.of());
 
     @Test
     void fromClasspath_findsThePackagedKit() {
