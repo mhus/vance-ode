@@ -53,8 +53,11 @@ public class VanceOdeJaglanProperties implements OdeInboundEndpoint {
      */
     private String apiKey = "";
 
+    /** Applied when neither the caller nor the operator names a usable number. */
+    public static final int DEFAULT_SEARCH_LIMIT = 25;
+
     /** Search results when the caller names no limit. */
-    private int defaultSearchLimit = 25;
+    private int defaultSearchLimit = DEFAULT_SEARCH_LIMIT;
 
     /**
      * Ceiling on search results, independent of what a caller asks for.
@@ -62,6 +65,10 @@ public class VanceOdeJaglanProperties implements OdeInboundEndpoint {
      * <p>Separate from the source's own declaration for the same reason
      * Centauri's {@code maxLimit} is: the capability figure is what the source
      * can serve, this one is what the operator will let one request cost.
+     *
+     * <p>Zero or less means <b>unset</b>, not "serve one row" — same reading as
+     * Centauri's, and for the same reason: taken literally, a typo here would
+     * make every search look like it found exactly one thing.
      */
     private int maxSearchLimit = 200;
 }

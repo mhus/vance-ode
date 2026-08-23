@@ -55,8 +55,14 @@ import java.util.Optional;
 public interface FileSource {
 
     /**
-     * What this source allows and how long its answers may be cached. Called
-     * behind a cache, so it may be computed rather than constant.
+     * What this source allows and how long its answers may be cached.
+     *
+     * <p><b>Evaluated once per request, so keep it cheap.</b> The reader caches
+     * the {@code capabilities} endpoint, but the other endpoints consult this
+     * to decide what they may do — {@code maxBytes} before every download,
+     * {@code access} before every write. A count that costs a query does not
+     * belong in {@link OdeFileCapabilities#itemCount()} unless you hold it
+     * already.
      */
     OdeFileCapabilities capabilities();
 
@@ -78,8 +84,11 @@ public interface FileSource {
     /**
      * Open a file for reading. The caller closes the stream.
      *
-     * <p>Throw for a path you do not have; the endpoint turns that into a 404
-     * after checking {@link #stat}, so the common case never reaches here.
+     * <p>Non-existence is answered by {@link #stat}, which the endpoint calls
+     * first, so the common case never reaches here. A throw <b>from here</b> is
+     * a 500 and not a 404 — deliberately: the only way to get here for a file
+     * that is gone is to lose the race between the two calls, and "keep the
+     * metadata row and retry" is the safe outcome of that race.
      */
     InputStream open(String path);
 

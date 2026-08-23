@@ -50,6 +50,44 @@ class StaticKitSourceTest {
     }
 
     @Test
+    void fromClasspath_withATreeThatRepeatsTheBaseSegment_keepsEveryFile() {
+        // Searching the whole address for "/nested/" finds the last occurrence,
+        // so nested/manuals/nested/a.md came out as "a.md" and replaced the
+        // real one — in the bundle and in the revision hash alike, so nothing
+        // looked wrong from either end. A manual would simply be missing.
+        KitSource source = StaticKitSource.fromClasspath("nested", "nested");
+
+        assertThat(source.build(REQUEST).files())
+                .containsKeys(OdeKitBundle.DESCRIPTOR, "a.md", "manuals/nested/a.md");
+    }
+
+    @Test
+    void fromClasspath_doesNotShareItsCachedBytesWithTheBundlesItBuilds() {
+        // A classpath source caches, and Map.copyOf is shallow: one consumer
+        // writing into an array it received would otherwise change the kit for
+        // every later request of this process.
+        KitSource source = StaticKitSource.fromClasspath("acme-crm", "kits/acme-crm");
+        byte[] handedOut = source.build(REQUEST).files().get(OdeKitBundle.DESCRIPTOR);
+
+        handedOut[0] = 'X';
+
+        assertThat(source.build(REQUEST).files().get(OdeKitBundle.DESCRIPTOR)[0])
+                .isNotEqualTo((byte) 'X');
+    }
+
+    @Test
+    void bundle_copiesTheBytesItWasGiven() {
+        byte[] content = "name: k\ndescription: d\n".getBytes(StandardCharsets.UTF_8);
+        OdeKitBundle bundle = new OdeKitBundle(
+                java.util.Map.of(OdeKitBundle.DESCRIPTOR, content));
+
+        content[0] = 'X';
+
+        assertThat(new String(bundle.files().get(OdeKitBundle.DESCRIPTOR),
+                StandardCharsets.UTF_8)).startsWith("name:");
+    }
+
+    @Test
     void fromClasspath_missingBase_saysSoRatherThanServingNothing() {
         // An empty bundle would surface at the far end as "delivered without a
         // descriptor", which sends whoever debugs it to the wrong end.

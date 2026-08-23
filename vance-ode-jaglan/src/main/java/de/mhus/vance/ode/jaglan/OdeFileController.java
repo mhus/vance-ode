@@ -25,9 +25,11 @@ import de.mhus.vance.ode.inbound.OdeErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.Nullable;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.InvalidMediaTypeException;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -59,6 +61,16 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
  * does not exist — which is why {@link #stat} maps
  * {@link Optional#empty()} to 404 and every thrown exception to 500, and never
  * conflates them.
+ *
+ * <p><b>405 is only ever "read-only".</b> The reader treats it as a stable
+ * refusal and stops asking, so it is decided here — from the declared
+ * {@link OdeFileAccess} — and, where the declaration and the implementation
+ * disagree, from an {@link UnsupportedOperationException} caught inside
+ * {@link #write} and {@link #delete} alone. It is deliberately not a
+ * controller-wide handler: that exception is what every immutable collection in
+ * the JDK throws, so one out of {@code list} or {@code search} is an ordinary
+ * bug inside a source, and answering it with a refusal would make a reader give
+ * up on a mount that is merely broken.
  */
 @RestController
 @RequestMapping("${vance.ode.jaglan.path:/ode/files}")
@@ -122,18 +134,32 @@ public class OdeFileController {
             // states a ceiling should not have to repeat the check.
             return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).build();
         }
+        // Resolved before the file is opened: an unparseable type is a
+        // property of the metadata, and finding that out after open() would
+        // leave the stream behind with nobody left to close it.
+        MediaType type = mediaTypeOf(meta.mimeType());
         InputStream stream = source.open(normalised);
-        ResponseEntity.BodyBuilder response = ResponseEntity.ok()
-                .contentType(meta.mimeType() == null
-                        ? MediaType.APPLICATION_OCTET_STREAM
-                        : MediaType.parseMediaType(meta.mimeType()));
-        if (meta.size() > 0) {
-            response.contentLength(meta.size());
+        if (stream == null) {
+            throw new IllegalStateException(
+                    "the source returned no stream for '" + normalised + "'");
         }
-        if (meta.etag() != null) {
-            response.header(HttpHeaders.ETAG, quoted(meta.etag()));
+        try {
+            ResponseEntity.BodyBuilder response = ResponseEntity.ok().contentType(type);
+            if (meta.size() > 0) {
+                response.contentLength(meta.size());
+            }
+            if (meta.etag() != null) {
+                response.header(HttpHeaders.ETAG, quoted(meta.etag()));
+            }
+            return response.body(new InputStreamResource(stream));
+        } catch (RuntimeException e) {
+            // Only the converter closes what it writes, so anything thrown
+            // between open() and handing the resource over loses the handle.
+            // In a library embedded in somebody else's process that is their
+            // file descriptors, not ours.
+            close(stream);
+            throw e;
         }
-        return response.body(new InputStreamResource(stream));
     }
 
     /**
@@ -149,7 +175,17 @@ public class OdeFileController {
         if (source.capabilities().access() != OdeFileAccess.READ_WRITE) {
             return refused("this file source is read-only");
         }
-        OdeFileEntry written = source.write(normalise(path), request.getInputStream());
+        InputStream body = request.getInputStream();
+        OdeFileEntry written;
+        try {
+            written = source.write(normalise(path), body);
+        } catch (UnsupportedOperationException e) {
+            // The declaration and the implementation disagree — a refusal, and
+            // caught here rather than controller-wide so that the same
+            // exception thrown out of a read path stays a failure. See the
+            // note on the class.
+            return refused(OdeBadRequestException.describe(e));
+        }
         return ResponseEntity.ok(written);
     }
 
@@ -159,7 +195,11 @@ public class OdeFileController {
         if (source.capabilities().access() != OdeFileAccess.READ_WRITE) {
             return refused("this file source is read-only");
         }
-        source.delete(normalise(path));
+        try {
+            source.delete(normalise(path));
+        } catch (UnsupportedOperationException e) {
+            return refused(OdeBadRequestException.describe(e));
+        }
         return ResponseEntity.noContent().build();
     }
 
@@ -180,13 +220,56 @@ public class OdeFileController {
         if (query == null || query.isBlank()) {
             throw new OdeBadRequestException("q is required");
         }
-        int clamped = Math.max(1, Math.min(
-                limit == null ? properties.getDefaultSearchLimit() : limit,
-                properties.getMaxSearchLimit()));
+        int wanted = limit != null ? limit : properties.getDefaultSearchLimit();
+        if (wanted <= 0) {
+            // Neither the caller nor the operator named a usable number.
+            wanted = VanceOdeJaglanProperties.DEFAULT_SEARCH_LIMIT;
+        }
+        int clamped = Math.min(wanted, positiveOr(properties.getMaxSearchLimit()));
         return source.search(query.strip(), clamped);
     }
 
     // ── boundary helpers ─────────────────────────────────────────────
+
+    /**
+     * A configured ceiling of zero or less read as "unset", not as "serve one
+     * row" — the same rule Centauri's {@code clampLimit} applies, and for the
+     * same reason: taken literally, a typo in the configuration would look like
+     * a source that only ever has a single match.
+     */
+    private static int positiveOr(int configured) {
+        return configured > 0 ? configured : Integer.MAX_VALUE;
+    }
+
+    /**
+     * The declared type, or octet-stream when it is not a media type.
+     *
+     * <p>A source may legitimately have an empty mime column, and
+     * {@code parseMediaType} throws for anything without a {@code type/subtype}
+     * shape. Falling back costs nothing — the reader guesses from the extension
+     * anyway — while throwing would make a typo in somebody's data look like an
+     * outage.
+     */
+    private static MediaType mediaTypeOf(@Nullable String declared) {
+        if (declared == null || declared.isBlank()) {
+            return MediaType.APPLICATION_OCTET_STREAM;
+        }
+        try {
+            return MediaType.parseMediaType(declared);
+        } catch (InvalidMediaTypeException e) {
+            log.debug("Jaglan files: '{}' is not a media type; serving as octet-stream", declared);
+            return MediaType.APPLICATION_OCTET_STREAM;
+        }
+    }
+
+    /** For a stream nobody will be handed, so nobody else will close it. */
+    private static void close(InputStream stream) {
+        try {
+            stream.close();
+        } catch (IOException e) {
+            log.debug("Jaglan files: failed to close a stream that was never served", e);
+        }
+    }
 
     /**
      * Normalise an inbound path to the form {@link OdeFileEntry} uses, and
@@ -197,6 +280,13 @@ public class OdeFileController {
      * handed, it cannot be walked out of by this endpoint. The reader already
      * rejects traversal on its side — this is the second of the two, because
      * a public endpoint cannot rely on its callers being well-behaved.
+     *
+     * <p>Which is why {@code /} is not the only separator considered. The
+     * contract says paths use {@code /}, but a source is free to hand the
+     * string to {@code Path.resolve} on whatever platform it runs on, and there
+     * {@code ..\..\etc} is one segment that walks out and {@code C:/x} replaces
+     * the base outright. Both are refused here, so the assurance above holds
+     * for a source that did nothing but resolve against its own root.
      */
     private static String normalise(String raw) {
         if (raw == null) return "";
@@ -207,20 +297,47 @@ public class OdeFileController {
         if (path.indexOf('\0') >= 0) {
             throw new OdeBadRequestException("path contains a NUL byte");
         }
+        if (path.indexOf('\\') >= 0) {
+            // Not a separator in this contract, and a separator on Windows —
+            // which is exactly why it cannot be let through as an ordinary
+            // character. OdeKitBundle refuses it for the same reason.
+            throw new OdeBadRequestException("path must use '/' and must not contain '\\'");
+        }
         for (String segment : path.split("/")) {
             if (".".equals(segment) || "..".equals(segment)) {
                 throw new OdeBadRequestException("path must not contain '.' or '..' segments");
             }
+            if (segment.isEmpty()) {
+                throw new OdeBadRequestException("path must not contain empty segments");
+            }
+            if (hasDriveLetter(segment)) {
+                throw new OdeBadRequestException(
+                        "path must be relative and must not name a drive");
+            }
         }
         return path;
+    }
+
+    /** {@code C:} and anything like it — absolute on Windows, and no {@code ..} needed. */
+    private static boolean hasDriveLetter(String segment) {
+        return segment.length() >= 2
+                && segment.charAt(1) == ':'
+                && Character.isLetter(segment.charAt(0));
     }
 
     private static String quoted(String etag) {
         return etag.startsWith("\"") ? etag : '"' + etag + '"';
     }
 
+    /**
+     * A refusal that is a property of the source, not of who is asking.
+     *
+     * <p>{@code Allow} because RFC 9110 requires it on a 405. The reader only
+     * reads the status, but a proxy or a browser between the two does not.
+     */
     private static ResponseEntity<OdeErrorResponse> refused(String message) {
         return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED)
+                .header(HttpHeaders.ALLOW, "GET")
                 .body(new OdeErrorResponse("read_only", message));
     }
 
@@ -241,15 +358,6 @@ public class OdeFileController {
             MethodArgumentTypeMismatchException e) {
         return ResponseEntity.badRequest().body(new OdeErrorResponse(
                 "bad_request", "parameter '" + e.getName() + "' is not a valid value"));
-    }
-
-    /**
-     * An operation the source declined. Distinct from a failure, and 405 like
-     * the pre-checked refusals above so a reader classifies both the same way.
-     */
-    @ExceptionHandler(UnsupportedOperationException.class)
-    public ResponseEntity<OdeErrorResponse> onUnsupported(UnsupportedOperationException e) {
-        return refused(OdeBadRequestException.describe(e));
     }
 
     /**

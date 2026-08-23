@@ -8,7 +8,8 @@ event, get a translation back) or to *be used by* one (answer a search,
 supply a feed). It carries the connection configuration, the error model
 and the transport so the application does not re-derive them.
 
-> **Status:** early. Three subsystems implemented (`ursa`, `centauri`, `zarniwoop`).
+> **Status:** early. Five subsystems implemented (`ursa`, `centauri`,
+> `zarniwoop`, `kit`, `jaglan`).
 > **Licence:** Apache-2.0.
 
 ## Modules
@@ -22,12 +23,13 @@ One module per Vancetope subsystem the application takes part in.
 | `vance-ode-centauri` | feed streams | inbound | **implemented** |
 | `vance-ode-zarniwoop` | research / search | inbound | **implemented** |
 | `vance-ode-kit` | kit provisioning | inbound | **implemented** |
+| `vance-ode-jaglan` | mounted files | inbound | **implemented** |
 
 ### Why by subsystem and not by direction
 
 The obvious alternative is to split client from server, and it was the
 first thing tried. It does not survive contact with the actual
-subsystems: two of the three are **inbound** contracts, where the
+subsystems: four of the five are **inbound** contracts, where the
 application answers a brain's request. Each of those is one thing — DTOs,
 endpoints, semantics — and splitting it across a client half and a server
 half would separate exactly what belongs together.
@@ -486,6 +488,126 @@ the reader's url already contained `/kit`, `accessUrl` would be the address of
 this endpoint rather than of the application — and a template cannot strip a
 suffix. So the reader knows the root, this module owns the sub-path.
 
+## Jaglan — being mounted
+
+The fourth inbound contract, and the third question a brain can ask about
+foreign content. Zarniwoop asks "what do you have on this topic" and Centauri
+"what is new"; Jaglan asks **"give me *these* bytes at *this* path"**.
+
+The difference that decides which one you are is **addressability**. A path is
+stored in a link, a document reference, a binder entry, and is expected to mean
+the same file tomorrow. If your ids churn, you are a search source, not a mount.
+
+Your files appear inside Vancetope under a project path (`_ext/<mount>/…`) and
+are opened, linked and embedded with the ordinary document tools. Nothing is
+copied: it keeps a metadata row per file and streams your bytes on every read.
+
+```xml
+<dependency>
+    <groupId>de.mhus.vance.ode</groupId>
+    <artifactId>vance-ode-jaglan</artifactId>
+    <version>0.2.0</version>
+</dependency>
+```
+
+```java
+@Component
+class LibraryFileSource implements FileSource {
+
+    @Override
+    public OdeFileCapabilities capabilities() {
+        return OdeFileCapabilities.readOnly();
+    }
+
+    @Override
+    public Optional<OdeFileEntry> stat(String path) {
+        // Optional.empty() is an ANSWER — see the assurances below.
+        return catalogue.find(path)
+                .map(row -> OdeFileEntry.file(row.path(), row.size(), row.mime(), row.etag()));
+    }
+
+    @Override
+    public List<OdeFileEntry> list(String path) {
+        return catalogue.childrenOf(path).stream().map(this::toEntry).toList();
+    }
+
+    @Override
+    public InputStream open(String path) {
+        return storage.read(path);   // the endpoint closes it
+    }
+}
+```
+
+```yaml
+vance:
+  ode:
+    jaglan:
+      path: /ode/files          # default; change it and tell the reader
+      api-key: ${FILES_KEY}     # empty means no check — read the warning below
+      max-search-limit: 200     # what one search may cost, whatever a source declares
+```
+
+The bean is the switch, as everywhere here: without a `FileSource` nothing is
+mapped.
+
+### The contract
+
+| Endpoint | Purpose |
+|---|---|
+| `GET {path}/capabilities` | what this source allows, and how long its answers may be cached |
+| `GET {path}/stat?path=…` | metadata for one path; 404 when you do not have it |
+| `GET {path}/list?path=…` | direct children of a folder, one level; omit `path` for your root |
+| `GET {path}/content?path=…` | the bytes, streamed — no JSON envelope, no base64 |
+| `PUT {path}/content?path=…` | replace the bytes; 405 for a read-only source |
+| `DELETE {path}/content?path=…` | delete at the source; 405 for a read-only source |
+| `GET {path}/search?q=…` | your own catalogue, when you declared `canSearch` |
+
+### Four assurances
+
+1. **Paths are stable.** The whole difference from a search result, and the
+   reason this contract exists.
+2. **`stat` distinguishes "gone" from "broken".** `Optional.empty()` for a file
+   you do not have; **throw** when you cannot answer. The reader deletes its
+   metadata row on the first and keeps it on the second — get it backwards and a
+   two-minute outage tells somebody their document does not exist.
+3. **`list` is authoritative for its own folder.** What you leave out, the
+   reader removes. There is no paging here, and a truncated listing looks like
+   deletion.
+4. **`open` streams and does not close.** You declared your own size ceiling in
+   `maxBytes`; do not materialise a large file to answer, and leave the stream
+   open — the endpoint closes it.
+
+### What the status codes mean
+
+`404` versus `5xx` is the load-bearing line, the same one as everywhere else in
+Ode: 404 is an **answer** the reader acts on, 5xx is a failure it backs off
+from. An unknown error counts as transient, which is the safer of the two.
+
+`405` is reserved for **read-only** and nothing else. It is a property of the
+source rather than of who is asking — a 403 would send a reader looking for a
+credential problem — and the reader treats it as stable and stops asking. Which
+is why an `UnsupportedOperationException` out of `list` or `search` is a 500 and
+not a 405: that is what every immutable collection in the JDK throws, so it is
+an ordinary bug inside a source, not a decision it made.
+
+`413` means the file is over the ceiling *you* declared in `maxBytes`. It is
+checked here so a source does not have to repeat its own limit.
+
+### The path you are handed is already defended
+
+Leading and trailing slashes are stripped, and `.`/`..` segments, `\`, empty
+segments and drive letters (`C:`) are refused with a 400 before you see them.
+So `rootDir.resolve(path)` is a safe implementation of `open` — which is the
+implementation the contract invites, and the reason the check is strict about
+separators this end does not itself use.
+
+### The shared secret
+
+Same rule as the other inbound modules — `api-key` empty means no check —
+but **worth a second thought here specifically**: this endpoint serves file
+*contents*, so an unguarded path is a file server. Set it unless something in
+front of the application already decides who may read.
+
 ## Facets — being filtered
 
 A **facet** is a dimension your source can be filtered by, and it works the same
@@ -538,7 +660,7 @@ still one level at a time, because `parent` is the question that was asked.
 
 ## Who may call
 
-Both inbound modules take the same bearer token, and there are two ways to
+Every inbound module takes the same bearer token, and there are two ways to
 decide whether it is good.
 
 **One shared secret** (`api-key`, above) is enough for a source serving one
@@ -632,6 +754,8 @@ On the **inbound** side — the endpoints you serve — a refusal carries
 |---|---|---|
 | `bad_request` | 400 | the caller sent something this endpoint will not serve |
 | `unauthorized` | 401 | missing or rejected bearer token |
+| `read_only` | 405 | Jaglan only: a write against a source that does not take them |
+| `bundle_too_large` | 413 | kit only: the kit packs to more than `max-bundle-bytes` |
 | `source_failed` | 500 | your source threw; the reader is expected to back off |
 
 The split matters more than it looks. A reader cools down on a 5xx and not on a

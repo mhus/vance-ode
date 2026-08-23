@@ -61,9 +61,15 @@ public class VanceOdeKitProperties implements OdeInboundEndpoint {
     /**
      * Ceiling on the packed size of one kit, in bytes.
      *
-     * <p>Guards against a source that grew a directory it did not mean to
-     * serve. The reader has no matching limit — it takes what arrives — so this
-     * end is where an accident gets caught.
+     * <p>Guards the wire against a source that grew a directory it did not mean
+     * to serve. The reader has no matching limit — it takes what arrives — so
+     * this end is where an accident gets caught.
+     *
+     * <p>Note where it sits: the kit is built and packed first, and the archive
+     * is measured afterwards. So it bounds what leaves the process, not what the
+     * process allocates to answer one request. Over the limit is answered
+     * {@code 413}, not a server error — waiting changes nothing about a kit that
+     * is too big.
      */
     private long maxBundleBytes = 32L * 1024 * 1024;
 }

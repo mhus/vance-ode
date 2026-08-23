@@ -15,6 +15,7 @@
  */
 package de.mhus.vance.ode.kit;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -29,6 +30,15 @@ import java.util.Map;
  * definitions — kilobytes, occasionally a megabyte — and a streaming contract
  * would cost every implementation a resource lifecycle for a size that never
  * needs one.
+ *
+ * <p><b>The arrays are copied on the way in.</b> {@link Map#copyOf} is shallow,
+ * and a source that caches its files — {@link
+ * StaticKitSource#fromClasspath(String, String)} does, because a jar does not
+ * change while the process runs — would otherwise
+ * hand the same mutable arrays to every bundle it ever builds. One consumer
+ * writing into one of them would change the kit for every later request of that
+ * process, and this record is public API in a library living inside somebody
+ * else's code. Kilobytes, by its own description.
  */
 public record OdeKitBundle(Map<String, byte[]> files) {
 
@@ -47,6 +57,7 @@ public record OdeKitBundle(Map<String, byte[]> files) {
             throw new IllegalArgumentException(
                     "a kit bundle must contain " + DESCRIPTOR + "; got " + files.keySet());
         }
+        Map<String, byte[]> copy = new LinkedHashMap<>(files.size());
         for (Map.Entry<String, byte[]> e : files.entrySet()) {
             String path = e.getKey();
             if (path == null || path.isBlank()) {
@@ -62,7 +73,8 @@ public record OdeKitBundle(Map<String, byte[]> files) {
             if (e.getValue() == null) {
                 throw new IllegalArgumentException("kit bundle entry '" + path + "' has no content");
             }
+            copy.put(path, e.getValue().clone());
         }
-        files = Map.copyOf(files);
+        files = Map.copyOf(copy);
     }
 }

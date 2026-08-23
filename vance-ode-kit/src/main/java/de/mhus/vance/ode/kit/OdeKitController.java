@@ -29,6 +29,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -58,28 +59,40 @@ import org.springframework.web.bind.annotation.RestController;
 @Slf4j
 public class OdeKitController {
 
-    private final SortedMap<String, KitSource> byId;
+    private final List<KitSource> sources;
     private final VanceOdeKitProperties properties;
 
     public OdeKitController(List<KitSource> sources, VanceOdeKitProperties properties) {
         this.properties = properties;
-        // Sorted by id, not bean-discovery order: that order is not stable
-        // between runs, and it decides the order of the capabilities list.
-        SortedMap<String, KitSource> map = new TreeMap<>();
-        for (KitSource source : sources) {
-            String id = source.declare().id();
-            KitSource clash = map.put(id, source);
+        this.sources = List.copyOf(sources);
+        // Routing is resolved per request rather than held from here, because
+        // declare() is allowed to fail: a directory the operator creates on
+        // first deploy, an index that is not up yet. This module is embedded in
+        // software it does not own, and refusing to build a bean would stop
+        // that application from starting over a feature it merely offers.
+        //
+        // What can be answered at startup still is, because it is the more
+        // useful moment to hear it: two sources claiming one id means one of
+        // them is silently unreachable, and that is worth refusing over. A
+        // source that could not be asked is logged and left to the request
+        // path, where it gets another chance.
+        Map<String, String> declared = new TreeMap<>();
+        for (KitSource source : this.sources) {
+            String id;
+            try {
+                id = source.declare().id();
+            } catch (RuntimeException e) {
+                log.error("Kit source {} could not declare itself; it is left out until it can",
+                        source.getClass().getName(), e);
+                continue;
+            }
+            String clash = declared.put(id, source.getClass().getName());
             if (clash != null) {
-                // Refused at startup rather than served by whichever bean the
-                // context happened to order last. Two sources claiming one id
-                // means one of them is silently unreachable.
                 throw new IllegalStateException("two kit sources both declare id '" + id
-                        + "': " + clash.getClass().getName() + " and "
-                        + source.getClass().getName());
+                        + "': " + clash + " and " + source.getClass().getName());
             }
         }
-        this.byId = java.util.Collections.unmodifiableSortedMap(map);
-        log.info("Ode kit endpoint serving {} kit(s): {}", byId.size(), byId.keySet());
+        log.info("Ode kit endpoint serving {} kit(s): {}", declared.size(), declared.keySet());
     }
 
     /**
@@ -89,12 +102,60 @@ public class OdeKitController {
      */
     @GetMapping("/capabilities")
     public OdeKitCapabilities capabilities() {
-        List<OdeKitDeclaration> declarations = new ArrayList<>(byId.size());
-        for (KitSource source : byId.values()) {
-            declarations.add(source.declare());
-        }
-        return new OdeKitCapabilities(declarations);
+        return new OdeKitCapabilities(resolve().declarations());
     }
+
+    /**
+     * Ask every source what it is offering, right now.
+     *
+     * <p>Sorted by id, not by bean-discovery order: that order is not stable
+     * between runs, and it decides the order of the capabilities list.
+     *
+     * <p>A source that throws is left out and counted rather than propagated.
+     * {@code declare()} is contractually cheap, so asking per request costs
+     * what {@code capabilities} already cost, and it buys the two things a
+     * startup snapshot cannot: a source that becomes available later shows up,
+     * and one that breaks later disappears instead of being served stale.
+     */
+    private Resolution resolve() {
+        SortedMap<String, Declared> byId = new TreeMap<>();
+        int unavailable = 0;
+        for (KitSource source : sources) {
+            OdeKitDeclaration declaration;
+            try {
+                declaration = source.declare();
+            } catch (RuntimeException e) {
+                log.error("Kit source {} failed to declare itself; leaving it out of this answer",
+                        source.getClass().getName(), e);
+                unavailable++;
+                continue;
+            }
+            Declared clash = byId.putIfAbsent(declaration.id(), new Declared(declaration, source));
+            if (clash != null) {
+                // Refused at startup when both sources could be asked then; if
+                // one only became declarable later there is nothing left to
+                // refuse, so the first by bean order is served and the loss is
+                // named rather than silent.
+                log.error("Kit sources {} and {} both declare id '{}'; serving the first",
+                        clash.source().getClass().getName(), source.getClass().getName(),
+                        declaration.id());
+            }
+        }
+        List<OdeKitDeclaration> declarations = new ArrayList<>(byId.size());
+        for (Declared declared : byId.values()) {
+            declarations.add(declared.declaration());
+        }
+        return new Resolution(byId, declarations, unavailable);
+    }
+
+    /** One source and what it just said about itself. */
+    private record Declared(OdeKitDeclaration declaration, KitSource source) {}
+
+    /** What the sources say right now, and how many of them could not be asked. */
+    private record Resolution(
+            SortedMap<String, Declared> byId,
+            List<OdeKitDeclaration> declarations,
+            int unavailable) {}
 
     /**
      * Build one kit and hand it over as a zip.
@@ -114,18 +175,28 @@ public class OdeKitController {
             // and that is the reason the field exists.
             throw new OdeBadRequestException("tenant is required");
         }
-        KitSource source = byId.get(request.kit());
-        if (source == null) {
+        Resolution resolution = resolve();
+        Declared declared = resolution.byId().get(request.kit());
+        if (declared == null) {
+            if (resolution.unavailable() > 0) {
+                // "This application does not serve that" is a 400 the caller is
+                // expected to act on, and we cannot honestly say it while a
+                // source that might have served it could not be asked. 5xx
+                // instead, which is the answer a reader backs off from.
+                throw new IllegalStateException("kit '" + request.kit() + "' is not among "
+                        + resolution.byId().keySet() + ", but " + resolution.unavailable()
+                        + " kit source(s) could not be asked");
+            }
             throw new OdeBadRequestException("this application does not serve kit='"
-                    + request.kit() + "'; it serves " + byId.keySet());
+                    + request.kit() + "'; it serves " + resolution.byId().keySet());
         }
 
         log.debug("Building kit '{}' for {}/{} of instance '{}'",
                 request.kit(), request.tenant(), request.project(), request.instance());
 
-        byte[] archive = pack(source.build(request), request.kit());
+        byte[] archive = pack(declared.source().build(request), request.kit());
         if (archive.length > properties.getMaxBundleBytes()) {
-            throw new IllegalStateException("kit '" + request.kit() + "' packs to "
+            throw new BundleTooLargeException("kit '" + request.kit() + "' packs to "
                     + archive.length + " bytes, over the configured limit of "
                     + properties.getMaxBundleBytes());
         }
@@ -160,6 +231,13 @@ public class OdeKitController {
         return out.toByteArray();
     }
 
+    /** A kit that packs to more than the operator allows over the wire. */
+    static final class BundleTooLargeException extends RuntimeException {
+        BundleTooLargeException(String message) {
+            super(message);
+        }
+    }
+
     @ExceptionHandler(OdeBadRequestException.class)
     public ResponseEntity<OdeErrorResponse> onBadRequest(OdeBadRequestException e) {
         return ResponseEntity.badRequest()
@@ -171,5 +249,31 @@ public class OdeKitController {
         log.debug("Unreadable kit build body", e);
         return ResponseEntity.badRequest()
                 .body(new OdeErrorResponse("bad_request", "request body is not valid JSON"));
+    }
+
+    /**
+     * A kit over the size limit. 413, not 500 — waiting changes nothing about
+     * it, and a reader that reads it as an outage retries a request that cannot
+     * begin to succeed until somebody edits either the kit or the limit.
+     */
+    @ExceptionHandler(BundleTooLargeException.class)
+    public ResponseEntity<OdeErrorResponse> onBundleTooLarge(BundleTooLargeException e) {
+        log.error("Ode kit: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
+                .body(new OdeErrorResponse("bundle_too_large", e.getMessage()));
+    }
+
+    /**
+     * Anything a source itself threw. 500 with a body of our own, deliberately:
+     * without this the exception escapes into whatever the host application
+     * does with unhandled ones, and a host that answers 200 with its own error
+     * page would have the reader unpack it as a zip. The cause is also logged
+     * here, which is the only place that knows which source it was.
+     */
+    @ExceptionHandler(RuntimeException.class)
+    public ResponseEntity<OdeErrorResponse> onSourceFailure(RuntimeException e) {
+        log.error("Ode kit: the source failed to answer", e);
+        return ResponseEntity.internalServerError()
+                .body(new OdeErrorResponse("source_failed", OdeBadRequestException.describe(e)));
     }
 }

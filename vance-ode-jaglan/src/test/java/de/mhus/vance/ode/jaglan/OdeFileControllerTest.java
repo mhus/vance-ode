@@ -24,6 +24,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -31,6 +32,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
@@ -154,6 +156,24 @@ class OdeFileControllerTest {
                 .andExpect(status().isPayloadTooLarge());
     }
 
+    @Test
+    void content_withAnUnparseableMimeType_isServedAndLeavesNoOpenStream() throws Exception {
+        // A source may legitimately have an empty mime column. Parsing that as
+        // a media type throws, and doing it after open() would answer 500 and
+        // strand a file handle in the host process on every retry.
+        UntypedSource untyped = new UntypedSource();
+
+        var result = mvc(untyped).perform(get(PATH + "/content").param("path", "x.bin"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        assertThat(result.getResponse().getContentType())
+                .isEqualTo("application/octet-stream");
+        assertThat(result.getResponse().getContentAsString()).isEqualTo("spice");
+        assertThat(untyped.opened).isNotNull();
+        assertThat(untyped.opened.closed).isTrue();
+    }
+
     // ─── write and delete ───────────────────────────────────────────────
 
     @Test
@@ -207,6 +227,26 @@ class OdeFileControllerTest {
                 .andExpect(jsonPath("$.error").value("read_only"));
     }
 
+    @Test
+    void refusal_carriesAnAllowHeader() throws Exception {
+        // RFC 9110 requires it on a 405. The reader only reads the status; a
+        // proxy or a browser in between does not.
+        mvc.perform(delete(PATH + "/content").param("path", "x.txt"))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(header().string("Allow", "GET"));
+    }
+
+    @Test
+    void unsupportedOperationOutOfAReadPath_is500AndNotARefusal() throws Exception {
+        // UnsupportedOperationException is what every immutable collection in
+        // the JDK throws, so out of list() it is an ordinary bug inside a
+        // source. Answered as 405 the reader would read it as a stable refusal
+        // and give up on a mount that is merely broken.
+        mvc(new ImmutableSortingSource()).perform(get(PATH + "/list").param("path", "books"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.error").value("source_failed"));
+    }
+
     // ─── search ─────────────────────────────────────────────────────────
 
     @Test
@@ -236,6 +276,25 @@ class OdeFileControllerTest {
                 .andExpect(jsonPath("$.error").value("bad_request"));
     }
 
+    @Test
+    void search_withACeilingOfZero_readsItAsUnsetRatherThanAsOneRow() throws Exception {
+        // Centauri reads a non-positive ceiling as "not configured" and says
+        // why; taken literally here it would make a configuration typo look
+        // like a source that only ever has a single match.
+        SearchingSource searching = new SearchingSource();
+        VanceOdeJaglanProperties unset = new VanceOdeJaglanProperties();
+        unset.setMaxSearchLimit(0);
+        MockMvc uncapped = MockMvcBuilders
+                .standaloneSetup(new OdeFileController(searching, unset))
+                .addPlaceholderValue("vance.ode.jaglan.path", PATH)
+                .build();
+
+        uncapped.perform(get(PATH + "/search").param("q", "dune").param("limit", "50"))
+                .andExpect(status().isOk());
+
+        assertThat(searching.lastLimit).isEqualTo(50);
+    }
+
     // ─── path hygiene ───────────────────────────────────────────────────
 
     @Test
@@ -251,6 +310,40 @@ class OdeFileControllerTest {
     @Test
     void singleDotSegment_isAlsoRefused() throws Exception {
         mvc.perform(get(PATH + "/list").param("path", "./books"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void backslashTraversal_isRefused() throws Exception {
+        // One segment as far as a '/' split is concerned, and a walk out of the
+        // root as far as Windows is concerned. The javadoc promises a source
+        // can resolve whatever it is handed against its own root, so this end
+        // has to defend the separator it does not itself use.
+        mvc.perform(get(PATH + "/stat").param("path", "..\\..\\etc\\passwd"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("bad_request"));
+        assertThat(source.statedPaths).isEmpty();
+    }
+
+    @Test
+    void uncPath_isRefused() throws Exception {
+        mvc.perform(get(PATH + "/stat").param("path", "\\\\server\\share\\secret.txt"))
+                .andExpect(status().isBadRequest());
+        assertThat(source.statedPaths).isEmpty();
+    }
+
+    @Test
+    void driveLetterPath_isRefused() throws Exception {
+        // Path.resolve with an absolute argument replaces the base, so this
+        // leaves the root without a single '..' in it.
+        mvc.perform(get(PATH + "/content").param("path", "C:/Windows/win.ini"))
+                .andExpect(status().isBadRequest());
+        assertThat(source.statedPaths).isEmpty();
+    }
+
+    @Test
+    void emptySegment_isRefused() throws Exception {
+        mvc.perform(get(PATH + "/list").param("path", "books//dune"))
                 .andExpect(status().isBadRequest());
     }
 
@@ -366,6 +459,60 @@ class OdeFileControllerTest {
         }
         @Override public InputStream open(String path) {
             return new ByteArrayInputStream(new byte[0]);
+        }
+    }
+
+    /** Declares an empty mime type — legal, and not a parseable media type. */
+    private static class UntypedSource implements FileSource {
+
+        @Nullable TrackedStream opened;
+
+        @Override public OdeFileCapabilities capabilities() {
+            return OdeFileCapabilities.readOnly();
+        }
+        @Override public Optional<OdeFileEntry> stat(String path) {
+            return Optional.of(OdeFileEntry.file(path, 5, "", "etag-1"));
+        }
+        @Override public List<OdeFileEntry> list(String path) {
+            return List.of();
+        }
+        @Override public InputStream open(String path) {
+            opened = new TrackedStream("spice");
+            return opened;
+        }
+    }
+
+    /** Sorts what {@code Stream.toList()} gave it — the ordinary source bug. */
+    private static class ImmutableSortingSource implements FileSource {
+        @Override public OdeFileCapabilities capabilities() {
+            return OdeFileCapabilities.readOnly();
+        }
+        @Override public Optional<OdeFileEntry> stat(String path) {
+            return Optional.empty();
+        }
+        @Override public List<OdeFileEntry> list(String path) {
+            List<OdeFileEntry> rows = List.of(OdeFileEntry.folder("books"));
+            rows.sort(null);
+            return rows;
+        }
+        @Override public InputStream open(String path) {
+            return new ByteArrayInputStream(new byte[0]);
+        }
+    }
+
+    /** Says whether anybody closed it. */
+    private static class TrackedStream extends ByteArrayInputStream {
+
+        boolean closed;
+
+        TrackedStream(String content) {
+            super(content.getBytes(StandardCharsets.UTF_8));
+        }
+
+        @Override
+        public void close() throws IOException {
+            closed = true;
+            super.close();
         }
     }
 

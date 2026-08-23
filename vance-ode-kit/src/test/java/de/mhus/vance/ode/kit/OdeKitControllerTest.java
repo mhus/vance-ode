@@ -72,6 +72,48 @@ class OdeKitControllerTest {
         }
     }
 
+    /** Declares fine, falls over when asked to build. */
+    private static final class FailingKitSource implements KitSource {
+        private final String id;
+
+        FailingKitSource(String id) {
+            this.id = id;
+        }
+
+        @Override
+        public OdeKitDeclaration declare() {
+            return new OdeKitDeclaration(id, null, "rev", null);
+        }
+
+        @Override
+        public OdeKitBundle build(OdeKitBuildRequest request) {
+            throw new IllegalStateException("the index is offline");
+        }
+    }
+
+    /**
+     * Cannot say what it is yet — a directory the operations team creates on
+     * first deploy, an index that comes up after the context does.
+     */
+    private static final class UndeclarableKitSource implements KitSource {
+
+        boolean ready;
+
+        @Override
+        public OdeKitDeclaration declare() {
+            if (!ready) {
+                throw new IllegalArgumentException("not a directory: /var/lib/acme/kit");
+            }
+            return new OdeKitDeclaration("late", null, "rev-late", null);
+        }
+
+        @Override
+        public OdeKitBundle build(OdeKitBuildRequest request) {
+            return new OdeKitBundle(Map.of(OdeKitBundle.DESCRIPTOR,
+                    "name: late\ndescription: d\n".getBytes(StandardCharsets.UTF_8)));
+        }
+    }
+
     private RecordingKitSource source;
     private MockMvc mvc;
 
@@ -247,18 +289,102 @@ class OdeKitControllerTest {
     }
 
     @Test
-    void build_overTheSizeLimit_fails() {
+    void build_overTheSizeLimit_is413AndNotAServerError() throws Exception {
         VanceOdeKitProperties tiny = new VanceOdeKitProperties();
         tiny.setMaxBundleBytes(1);
         MockMvc limited = MockMvcBuilders
                 .standaloneSetup(new OdeKitController(List.of(source), tiny))
                 .build();
 
-        assertThatThrownBy(() -> limited.perform(post(PATH + "/build")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("""
-                        {"kit":"acme-crm","tenant":"acme"}""")))
-                .hasRootCauseInstanceOf(IllegalStateException.class);
+        // Waiting changes nothing about a kit that is too big. Read as a 5xx
+        // the reader backs off and retries a request that cannot succeed until
+        // somebody edits either the kit or the limit.
+        limited.perform(post(PATH + "/build")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"kit":"acme-crm","tenant":"acme"}"""))
+                .andExpect(status().isPayloadTooLarge())
+                .andExpect(jsonPath("$.error").value("bundle_too_large"));
+    }
+
+    @Test
+    void build_whenTheSourceThrows_is500WithAnErrorBodyOfOurOwn() throws Exception {
+        // Without a handler this escapes into the host's error handling, and a
+        // host that answers 200 with its own error page would have the reader
+        // unpack that as a zip.
+        MockMvc failing = MockMvcBuilders
+                .standaloneSetup(new OdeKitController(
+                        List.of(new FailingKitSource("acme-crm")), new VanceOdeKitProperties()))
+                .build();
+
+        failing.perform(post(PATH + "/build")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"kit":"acme-crm","tenant":"acme"}"""))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.error").value("source_failed"));
+    }
+
+    @Test
+    void construction_withASourceThatCannotDeclareItselfYet_doesNotStopTheHost() {
+        // A directory the operations team creates on first deploy must not keep
+        // the embedding application's context from starting.
+        OdeKitController controller = new OdeKitController(
+                List.of(new UndeclarableKitSource(), source), new VanceOdeKitProperties());
+
+        assertThat(controller.capabilities().kits())
+                .singleElement()
+                .satisfies(k -> assertThat(k.id()).isEqualTo("acme-crm"));
+    }
+
+    @Test
+    void capabilities_picksUpASourceThatBecameDeclarableAfterStartup() {
+        UndeclarableKitSource late = new UndeclarableKitSource();
+        OdeKitController controller = new OdeKitController(
+                List.of(late, source), new VanceOdeKitProperties());
+        assertThat(controller.capabilities().kits()).hasSize(1);
+
+        late.ready = true;
+
+        // Resolved per request precisely so this works — declare() is cheap by
+        // contract, and a startup snapshot could only ever go stale.
+        assertThat(controller.capabilities().kits()).hasSize(2);
+    }
+
+    @Test
+    void build_whenASourceCouldNotBeAsked_isNotReportedAsNotServed() throws Exception {
+        MockMvc partial = MockMvcBuilders
+                .standaloneSetup(new OdeKitController(
+                        List.of(new UndeclarableKitSource(), source), new VanceOdeKitProperties()))
+                .build();
+
+        // "This application does not serve that" is a 400 the caller acts on,
+        // and it cannot be said honestly while a source that might have served
+        // it could not be asked.
+        partial.perform(post(PATH + "/build")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"kit":"other","tenant":"acme"}"""))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.error").value("source_failed"));
+    }
+
+    @Test
+    void build_paramWithoutAValue_isDroppedRatherThanCallingTheBodyInvalidJson()
+            throws Exception {
+        // `params: {lang: }` in the caller's provisioning file arrives as a
+        // JSON null. Map.copyOf used to throw on it inside deserialisation, and
+        // the answer blamed the JSON — which was fine.
+        mvc.perform(post(PATH + "/build")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"kit":"acme-crm","tenant":"acme",
+                                 "params":{"lang":null,"modules":"crm"}}"""))
+                .andExpect(status().isOk());
+
+        OdeKitBuildRequest request = source.requests.getFirst();
+        assertThat(request.params()).containsOnlyKeys("modules");
+        assertThat(request.param("lang", "en")).isEqualTo("en");
     }
 
     private byte[] build() throws Exception {
