@@ -15,9 +15,12 @@
  */
 package de.mhus.vance.ode.jaglan;
 
+import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import de.mhus.vance.ode.inbound.OdeBadRequestException;
@@ -62,15 +65,23 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
  * {@link Optional#empty()} to 404 and every thrown exception to 500, and never
  * conflates them.
  *
- * <p><b>405 is only ever "read-only".</b> The reader treats it as a stable
- * refusal and stops asking, so it is decided here — from the declared
- * {@link OdeFileAccess} — and, where the declaration and the implementation
- * disagree, from an {@link UnsupportedOperationException} caught inside
- * {@link #write} and {@link #delete} alone. It is deliberately not a
- * controller-wide handler: that exception is what every immutable collection in
- * the JDK throws, so one out of {@code list} or {@code search} is an ordinary
- * bug inside a source, and answering it with a refusal would make a reader give
- * up on a mount that is merely broken.
+ * <p><b>405 means "this source does not serve that shape of request".</b> Two
+ * of them exist: a write against a read-only source ({@code read_only}) and a
+ * parameterised read against a source that declared none
+ * ({@code query_unsupported}). The reader treats a 405 as a stable refusal and
+ * stops asking, so both are decided here from the declaration — and, where the
+ * declaration and the implementation disagree, from an
+ * {@link UnsupportedOperationException} caught inside {@link #write},
+ * {@link #delete} and the parameterised branch of {@link #content} alone. It is
+ * deliberately not a controller-wide handler: that exception is what every
+ * immutable collection in the JDK throws, so one out of {@code list} or
+ * {@code search} is an ordinary bug inside a source, and answering it with a
+ * refusal would make a reader give up on a mount that is merely broken. The
+ * same caveat applies to the three narrow catches — a source whose own computed
+ * view trips over an immutable collection is read as a refusal — and it is
+ * accepted for the same reason it already is on {@code write}: the alternative
+ * is a permanent misconfiguration presenting as an outage and being retried
+ * forever.
  */
 @RestController
 @RequestMapping("${vance.ode.jaglan.path:/ode/files}")
@@ -119,17 +130,46 @@ public class OdeFileController {
      * the file. The mime type and length come from {@link FileSource#stat} —
      * one extra call, and worth it: without a {@code Content-Length} the reader
      * cannot show progress, and without a type it has to guess from the path.
+     *
+     * <p><b>Any parameter other than {@code path} makes this a parameterised
+     * read</b>, and a source that declared none refuses it. That is stricter
+     * than ignoring the parameter, and deliberately so: ignoring is how a
+     * caller ends up with the plain file believing it is the view they asked
+     * for. The consequence is worth stating — a cache-buster or a stray
+     * parameter appended by something in between now turns a working read into
+     * a 405.
+     *
+     * <p>Only {@code path} is reserved, and only because it addresses the file.
+     * The reader keeps its own reserved list for its own URL space
+     * ({@code kind}, {@code download}) and strips those before forwarding;
+     * that list is not repeated here, because the parameter namespace on this
+     * endpoint belongs to the source, not to us.
      */
     @GetMapping("/content")
-    public ResponseEntity<InputStreamResource> content(@RequestParam("path") String path) {
+    public ResponseEntity<?> content(
+            @RequestParam("path") String path, HttpServletRequest request) {
         String normalised = normalise(path);
+        OdeQuery query = queryOf(request);
         Optional<OdeFileEntry> entry = source.stat(normalised);
         if (entry.isEmpty() || entry.get().folder()) {
             return ResponseEntity.notFound().build();
         }
         OdeFileEntry meta = entry.get();
-        Long limit = source.capabilities().maxBytes();
-        if (limit != null && meta.size() > limit) {
+        // One evaluation: FileSource#capabilities is documented as per-request
+        // and cheap, and a source that took that at its word should not pay
+        // twice on the most expensive path.
+        OdeFileCapabilities caps = source.capabilities();
+        boolean parameterised = !query.isEmpty();
+        if (parameterised && !caps.supportsQuery()) {
+            // 405 rather than 400: this is a property of the source, not of
+            // the request. Through refused() like every other refusal, so it
+            // carries Allow and a reason — a bare status leaves the reader
+            // reporting a refusal it cannot explain.
+            return refused("query_unsupported",
+                    "this file source does not serve parameterised reads");
+        }
+        Long limit = caps.maxBytes();
+        if (limit != null && !parameterised && meta.size() > limit) {
             // Declared limit, enforced here rather than trusted: a source that
             // states a ceiling should not have to repeat the check.
             return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).build();
@@ -137,19 +177,52 @@ public class OdeFileController {
         // Resolved before the file is opened: an unparseable type is a
         // property of the metadata, and finding that out after open() would
         // leave the stream behind with nobody left to close it.
+        //
+        // It comes from stat even for a computed view, and that is a contract
+        // rule rather than an oversight (see FileSource#open(String,OdeQuery)):
+        // a view keeps the type of the path it is a view of. The reader renders
+        // from the mime on its own metadata row, so a response that claimed a
+        // different type would not survive the trip anyway.
         MediaType type = mediaTypeOf(meta.mimeType());
-        InputStream stream = source.open(normalised);
+        InputStream stream;
+        try {
+            stream = parameterised
+                    ? source.open(normalised, query)
+                    : source.open(normalised);
+        } catch (UnsupportedOperationException e) {
+            // Declared supportsQuery, did not implement it. A permanent
+            // refusal, not an outage: left as a 500 it would classify as
+            // transient on the reader side and be retried forever against a
+            // misconfiguration nobody is going to fix by waiting. Same
+            // treatment, and the same caveat, as write and delete.
+            if (!parameterised) throw e;
+            return refused("query_unsupported", OdeBadRequestException.describe(e));
+        }
         if (stream == null) {
             throw new IllegalStateException(
                     "the source returned no stream for '" + normalised + "'");
         }
         try {
             ResponseEntity.BodyBuilder response = ResponseEntity.ok().contentType(type);
-            if (meta.size() > 0) {
+            // Both of these describe the *plain* file and are wrong for a
+            // computed view — a stale Content-Length truncates the answer or
+            // breaks the response outright, and a stale ETag would let a
+            // cache hand back one view in place of another.
+            if (!parameterised && meta.size() > 0) {
                 response.contentLength(meta.size());
             }
-            if (meta.etag() != null) {
+            if (!parameterised && meta.etag() != null) {
                 response.header(HttpHeaders.ETAG, quoted(meta.etag()));
+            }
+            if (parameterised) {
+                response.header(HttpHeaders.CACHE_CONTROL, "no-store");
+                // The declared ceiling still applies — more so here than
+                // anywhere else, because a computed view is the one answer
+                // whose size nothing knows in advance. Without this the one
+                // case that can produce arbitrary bytes would be the only one
+                // running unbounded, and with Content-Length suppressed the
+                // reader cannot pre-check either.
+                stream = bounded(stream, limit, normalised);
             }
             return response.body(new InputStreamResource(stream));
         } catch (RuntimeException e) {
@@ -250,6 +323,24 @@ public class OdeFileController {
      * anyway — while throwing would make a typo in somebody's data look like an
      * outage.
      */
+    /**
+     * The request's parameters, minus the one that addresses the file.
+     *
+     * <p>{@code path} is this endpoint's own and never a source parameter — a
+     * source that saw it would be reading the address as data. It is dropped
+     * here rather than refused, because the reader already refuses a query
+     * that declares it; by the time a request arrives, a {@code path} is ours.
+     */
+    private static OdeQuery queryOf(HttpServletRequest request) {
+        Map<String, List<String>> parameters = new LinkedHashMap<>();
+        request.getParameterMap().forEach((name, values) -> {
+            if (!"path".equals(name) && values != null && values.length > 0) {
+                parameters.put(name, List.of(values));
+            }
+        });
+        return parameters.isEmpty() ? OdeQuery.EMPTY : new OdeQuery(parameters);
+    }
+
     private static MediaType mediaTypeOf(@Nullable String declared) {
         if (declared == null || declared.isBlank()) {
             return MediaType.APPLICATION_OCTET_STREAM;
@@ -336,9 +427,68 @@ public class OdeFileController {
      * reads the status, but a proxy or a browser between the two does not.
      */
     private static ResponseEntity<OdeErrorResponse> refused(String message) {
+        return refused("read_only", message);
+    }
+
+    /**
+     * The same refusal with an explicit code.
+     *
+     * <p>Two shapes of request a source can decline — writing to a read-only
+     * source, and a parameterised read it does not serve — and they are not
+     * the same fact. One code for both would tell a reader "read_only" about a
+     * source that is perfectly writable.
+     */
+    private static ResponseEntity<OdeErrorResponse> refused(String code, String message) {
         return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED)
                 .header(HttpHeaders.ALLOW, "GET")
-                .body(new OdeErrorResponse("read_only", message));
+                .body(new OdeErrorResponse(code, message));
+    }
+
+    /**
+     * Cap a stream at the source's declared {@code maxBytes}.
+     *
+     * <p>It <b>fails</b> past the limit rather than truncating: a short answer
+     * that arrives with a 200 is indistinguishable from a complete one, and
+     * for computed content — where nobody knows the expected length — nothing
+     * downstream could catch it. The transfer breaking is ugly and visible,
+     * which is the right way round.
+     *
+     * <p>There is no way to turn this into a 413: the status is on the wire
+     * before the first byte is produced. A source that exceeds its own declared
+     * ceiling is broken, and this is the containment, not the diagnosis.
+     */
+    private static InputStream bounded(InputStream source, @Nullable Long limit, String path) {
+        if (limit == null || limit <= 0) {
+            return source;
+        }
+        long max = limit;
+        return new FilterInputStream(source) {
+            private long read;
+
+            @Override
+            public int read() throws IOException {
+                int b = super.read();
+                if (b != -1) count(1);
+                return b;
+            }
+
+            @Override
+            public int read(byte[] buffer, int off, int len) throws IOException {
+                int n = super.read(buffer, off, len);
+                if (n > 0) count(n);
+                return n;
+            }
+
+            private void count(int n) throws IOException {
+                read += n;
+                if (read > max) {
+                    log.error("Jaglan files: computed view of '{}' exceeded the declared "
+                            + "maxBytes of {} — aborting the transfer", path, max);
+                    throw new IOException("computed content exceeded the declared maxBytes of "
+                            + max + " for '" + path + "'");
+                }
+            }
+        };
     }
 
     /**

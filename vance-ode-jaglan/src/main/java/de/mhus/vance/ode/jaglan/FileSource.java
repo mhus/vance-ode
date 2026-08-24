@@ -93,6 +93,50 @@ public interface FileSource {
     InputStream open(String path);
 
     /**
+     * Open a <b>parameterised view</b> of a path — the same address, with the
+     * parameters the reader was given, turned into computed content.
+     *
+     * <p>Only called when you declared
+     * {@link OdeFileCapabilities#supportsQuery()}. The default refuses, so a
+     * declaration you have not implemented fails loudly on the first call
+     * rather than answering with the plain file.
+     *
+     * <p><b>Refusing beats ignoring, and that is the point of the whole
+     * feature.</b> A file served without regard for the parameters is not an
+     * error anybody can see: it is a chart for the wrong date range, correct
+     * in every visible respect except the one that was asked about. If you
+     * cannot honour a parameter, throw.
+     *
+     * <p>The same path with the same parameters should give the same answer,
+     * and answering must be cheap enough to happen inside a read — the reader
+     * has no job queue for this. There is no caching on the other side: a
+     * parameterised read is never cached, so anything expensive should be
+     * cached by you, or offered as an ordinary path instead.
+     *
+     * <p><b>A view keeps the type of the path it is a view of.</b> The response
+     * carries the mime type your {@link #stat} declared, because the reader
+     * renders from the mime on its own metadata row — a differing type would
+     * not survive the trip even if this method could state one. If you need to
+     * serve another format, give it another path
+     * ({@code report.pdf} beside {@code report.yaml}), not another parameter.
+     *
+     * <p>Your declared {@link OdeFileCapabilities#maxBytes()} still applies.
+     * It cannot be checked before the fact here — nothing knows the length of
+     * an answer that does not exist yet — so it is enforced on the way out and
+     * a view that exceeds it has its transfer aborted.
+     *
+     * @param query never null; empty means the caller wanted a plain read
+     */
+    default InputStream open(String path, OdeQuery query) {
+        if (query != null && !query.isEmpty()) {
+            throw new UnsupportedOperationException(
+                    "this file source does not serve parameterised reads, but was given "
+                            + query.names() + " for '" + path + "'");
+        }
+        return open(path);
+    }
+
+    /**
      * Write a file. Default refuses.
      *
      * <p>Only called when you declared {@link OdeFileAccess#READ_WRITE}, so

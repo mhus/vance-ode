@@ -16,6 +16,7 @@
 package de.mhus.vance.ode.jaglan;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -29,7 +30,9 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.jspecify.annotations.Nullable;
@@ -347,6 +350,172 @@ class OdeFileControllerTest {
                 .andExpect(status().isBadRequest());
     }
 
+    // ─── parameterised reads ────────────────────────────────────────────
+
+    @Test
+    void content_withAQuery_againstASourceThatDeclaredNone_isRefused() throws Exception {
+        // 405, not 400: whether parameters are served is a property of the
+        // source, and a 4xx about the request would send the caller looking
+        // for a mistake in their parameters. With Allow and a reason, like
+        // every other refusal here — a bare status leaves the reader reporting
+        // a refusal it cannot explain, and a proxy in between seeing a 405
+        // that violates RFC 9110.
+        mvc.perform(get(PATH + "/content").param("path", "books/dune.pdf").param("from", "2026-01"))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(header().string("Allow", "GET"))
+                .andExpect(jsonPath("$.error").value("query_unsupported"));
+    }
+
+    @Test
+    void content_declaredButUnimplemented_is405AndNot500() throws Exception {
+        // The distinction that matters: 500 classifies as transient on the
+        // reader side, so a permanent misconfiguration would be retried
+        // forever while stale metadata rows are kept alive.
+        MockMvc broken = mvc(new DeclaredButUnimplementedSource());
+
+        broken.perform(get(PATH + "/content").param("path", "a.yaml").param("from", "2026-01"))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(jsonPath("$.error").value("query_unsupported"));
+    }
+
+    @Test
+    void content_computedViewAboveTheDeclaredLimit_isAborted() throws Exception {
+        // maxBytes cannot be checked in advance for content that does not
+        // exist yet, so it is enforced on the way out. Without this the one
+        // case that can produce arbitrary bytes would be the only unbounded
+        // one — and with Content-Length suppressed, nothing downstream could
+        // notice either.
+        MockMvc capped = mvc(new CappedQuerySource());
+
+        assertThatThrownBy(() -> capped.perform(
+                get(PATH + "/content").param("path", "a.yaml").param("from", "2026-01")))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("maxBytes");
+    }
+
+    @Test
+    void odeQuery_keepsTheOrderParametersArrivedIn() {
+        // names() promises order, and a source may derive a cache key from it.
+        // Map.copyOf would randomise that per JVM run.
+        Map<String, List<String>> raw = new LinkedHashMap<>();
+        raw.put("zulu", List.of("1"));
+        raw.put("alpha", List.of("2"));
+        raw.put("mike", List.of("3"));
+
+        assertThat(new OdeQuery(raw).names()).containsExactly("zulu", "alpha", "mike");
+    }
+
+    @Test
+    void content_withAQuery_reachesTheSourceWithoutThePathParameter() throws Exception {
+        QuerySource source = new QuerySource();
+
+        mvc(source).perform(get(PATH + "/content")
+                        .param("path", "analysis.yaml")
+                        .param("from", "2026-01")
+                        .param("tag", "a").param("tag", "b"))
+                .andExpect(status().isOk());
+
+        // 'path' addresses the file; a source that saw it would be reading the
+        // address as data.
+        assertThat(source.received.names()).containsExactly("from", "tag");
+        assertThat(source.received.first("from")).isEqualTo("2026-01");
+        // Repeated keys survive: a multiple-choice input produces them, and
+        // half a chosen set delivered silently is the failure this avoids.
+        assertThat(source.received.all("tag")).containsExactly("a", "b");
+    }
+
+    @Test
+    void content_withAQuery_sendsNeitherLengthNorEtagOfThePlainFile() throws Exception {
+        // Both describe the unparameterised file. A stale Content-Length
+        // truncates the computed answer; a stale ETag lets a cache hand back
+        // one view in place of another.
+        mvc(new QuerySource()).perform(get(PATH + "/content")
+                        .param("path", "analysis.yaml").param("from", "2026-01"))
+                .andExpect(status().isOk())
+                .andExpect(header().doesNotExist("ETag"))
+                .andExpect(header().doesNotExist("Content-Length"))
+                .andExpect(header().string("Cache-Control", "no-store"));
+    }
+
+    @Test
+    void content_withoutAQuery_stillCarriesLengthAndEtag() throws Exception {
+        mvc.perform(get(PATH + "/content").param("path", "books/dune.pdf"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("ETag", "\"etag-1\""));
+    }
+
+    /** Declares parameterised reads and never implements them. */
+    private static class DeclaredButUnimplementedSource implements FileSource {
+        @Override public OdeFileCapabilities capabilities() {
+            return new OdeFileCapabilities(
+                    OdeFileAccess.READ_ONLY, false, null, Duration.ofMinutes(5), null, true, null);
+        }
+        @Override public Optional<OdeFileEntry> stat(String path) {
+            return Optional.of(OdeFileEntry.file(path, 5, "text/yaml", null));
+        }
+        @Override public List<OdeFileEntry> list(String path) {
+            return List.of();
+        }
+        @Override public InputStream open(String path) {
+            return new ByteArrayInputStream("plain".getBytes(StandardCharsets.UTF_8));
+        }
+        // open(path, query) deliberately not overridden — the SPI default throws.
+    }
+
+    /** Declares a small ceiling and then blows through it. */
+    private static class CappedQuerySource implements FileSource {
+        @Override public OdeFileCapabilities capabilities() {
+            return new OdeFileCapabilities(
+                    OdeFileAccess.READ_ONLY, false, null, Duration.ofMinutes(5), 8L, true, null);
+        }
+        @Override public Optional<OdeFileEntry> stat(String path) {
+            return Optional.of(OdeFileEntry.file(path, 5, "text/yaml", null));
+        }
+        @Override public List<OdeFileEntry> list(String path) {
+            return List.of();
+        }
+        @Override public InputStream open(String path) {
+            return new ByteArrayInputStream("plain".getBytes(StandardCharsets.UTF_8));
+        }
+        @Override public InputStream open(String path, OdeQuery query) {
+            return new ByteArrayInputStream(
+                    "far more than eight bytes".getBytes(StandardCharsets.UTF_8));
+        }
+    }
+
+    /** Declares parameterised reads and records what it was handed. */
+    private static class QuerySource implements FileSource {
+
+        OdeQuery received = OdeQuery.EMPTY;
+
+        @Override
+        public OdeFileCapabilities capabilities() {
+            return new OdeFileCapabilities(
+                    OdeFileAccess.READ_ONLY, false, null, Duration.ofMinutes(5), null, true, null);
+        }
+
+        @Override
+        public Optional<OdeFileEntry> stat(String path) {
+            return Optional.of(OdeFileEntry.file(path, 5, "text/yaml", "etag-plain"));
+        }
+
+        @Override
+        public List<OdeFileEntry> list(String path) {
+            return List.of();
+        }
+
+        @Override
+        public InputStream open(String path) {
+            return new ByteArrayInputStream("plain".getBytes(StandardCharsets.UTF_8));
+        }
+
+        @Override
+        public InputStream open(String path, OdeQuery query) {
+            received = query;
+            return new ByteArrayInputStream("computed:".getBytes(StandardCharsets.UTF_8));
+        }
+    }
+
     // ─── test doubles ───────────────────────────────────────────────────
 
     /** A read-only source with one folder and one file. */
@@ -403,7 +572,7 @@ class OdeFileControllerTest {
     private static class CappedSource implements FileSource {
         @Override public OdeFileCapabilities capabilities() {
             return new OdeFileCapabilities(
-                    OdeFileAccess.READ_ONLY, false, null, Duration.ofMinutes(5), 10L, null);
+                    OdeFileAccess.READ_ONLY, false, null, Duration.ofMinutes(5), 10L, false, null);
         }
         @Override public Optional<OdeFileEntry> stat(String path) {
             return Optional.of(OdeFileEntry.file(path, 5_000, "application/octet-stream", null));
@@ -522,7 +691,7 @@ class OdeFileControllerTest {
 
         @Override public OdeFileCapabilities capabilities() {
             return new OdeFileCapabilities(
-                    OdeFileAccess.READ_ONLY, true, null, Duration.ofMinutes(5), null, null);
+                    OdeFileAccess.READ_ONLY, true, null, Duration.ofMinutes(5), null, false, null);
         }
         @Override public Optional<OdeFileEntry> stat(String path) {
             return Optional.empty();

@@ -57,6 +57,14 @@ import org.jspecify.annotations.Nullable;
  *                    showing 0 for your mount displays "empty folder"
  * @param metadataTtl how long listings and metadata may be cached
  * @param maxBytes    largest file you will serve, {@code null} for no limit
+ * @param supportsQuery whether one of your paths, given a query string, is a
+ *                    <b>computed view</b> of itself — {@code analysis.yaml}
+ *                    versus {@code analysis.yaml?from=…}. Default
+ *                    {@code false}, and the reader will not send you a query
+ *                    unless you say true here. Say true only if you actually
+ *                    read the parameters: a source that ignores them answers
+ *                    with the unparameterised file, which arrives looking like
+ *                    a valid answer to a question nobody answered
  * @param displayName label a person sees next to the mount
  */
 public record OdeFileCapabilities(
@@ -65,6 +73,7 @@ public record OdeFileCapabilities(
         @Nullable Long itemCount,
         Duration metadataTtl,
         @Nullable Long maxBytes,
+        boolean supportsQuery,
         @Nullable String displayName) {
 
     /** Applied when no TTL is stated at all. */
@@ -84,12 +93,12 @@ public record OdeFileCapabilities(
     /** The pessimistic default: readable, no search, nothing else claimed. */
     public static OdeFileCapabilities readOnly() {
         return new OdeFileCapabilities(
-                OdeFileAccess.READ_ONLY, false, null, DEFAULT_TTL, null, null);
+                OdeFileAccess.READ_ONLY, false, null, DEFAULT_TTL, null, false, null);
     }
 
     /** Readable and writable, no search. */
     public static OdeFileCapabilities readWrite() {
         return new OdeFileCapabilities(
-                OdeFileAccess.READ_WRITE, false, null, DEFAULT_TTL, null, null);
+                OdeFileAccess.READ_WRITE, false, null, DEFAULT_TTL, null, false, null);
     }
 }
