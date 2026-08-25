@@ -696,6 +696,25 @@ There are no annotations, no classpath scan, no path variables and no
 interceptors. A variable in the path is where a declaration turns into a router,
 and a mount that needs one address per instance has a real tree to put them in.
 
+### Two formats of one report
+
+A report served as both YAML and Markdown is two endpoints — the mime type
+belongs to the path — but it should not be two entries in the description with
+the same parameter list. The second one says whose answer it re-renders:
+
+```java
+return EndpointSpec.of("reports/loans.md", "text/markdown", "Loans",
+                "The same report as a table, for reading.", SHARED_PARAMS)
+        .asRenderingOf("reports/loans.yaml");
+```
+
+The description then carries one entry for the report, with the other format
+under `alsoAt`. Both paths stay in the tree, both stay readable, both take the
+same parameters — that last part is checked when the source is wrapped, because a
+format described under someone else's parameter list while accepting a different
+one is a documented lie. A rendering of a rendering is refused too: formats are
+one level.
+
 ### `_api.yaml` — the mount describes itself
 
 `EndpointFileSource` serves one more path: `_api.yaml` at the mount root, listing

@@ -51,22 +51,47 @@ public record ApiDescription(
         List<String> usage,
         List<ApiDescription.Endpoint> endpoints) {
 
-    /** One computed path. */
+    /**
+     * One computed path.
+     *
+     * @param alsoAt the same answer under other paths, in other formats. Empty
+     *               for most endpoints. It exists so that a report served as
+     *               both YAML and Markdown is <b>one</b> entry with two formats
+     *               rather than two entries with the same parameter list — and
+     *               so that neither format is missing from the description,
+     *               which is the only place a caller learns that these paths
+     *               take parameters at all
+     */
     public record Endpoint(
             String path,
             String title,
             String mime,
             String description,
-            List<ApiDescription.Param> parameters) {
+            List<ApiDescription.Param> parameters,
+            List<ApiDescription.Format> alsoAt) {
 
-        static Endpoint of(EndpointSpec spec) {
+        static Endpoint of(EndpointSpec spec, List<EndpointSpec> renderings) {
             List<Param> params = new ArrayList<>(spec.params().size());
             for (EndpointParam param : spec.params()) {
                 params.add(Param.of(param));
             }
+            List<Format> formats = new ArrayList<>(renderings.size());
+            for (EndpointSpec rendering : renderings) {
+                formats.add(new Format(rendering.path(), rendering.mimeType(),
+                        rendering.description()));
+            }
             return new Endpoint(spec.path(), spec.title(), spec.mimeType(),
-                    spec.description(), params);
+                    spec.description(), params, formats);
         }
+    }
+
+    /**
+     * The same answer, rendered differently, at its own path.
+     *
+     * <p>The parameters are not repeated: they are the ones of the entry this
+     * sits under, which the module enforces rather than assumes.
+     */
+    public record Format(String path, String mime, String description) {
     }
 
     /**

@@ -21,6 +21,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * What one endpoint is: where it lives, what it answers with, and every
  * parameter it accepts.
@@ -35,8 +37,14 @@ import java.util.Set;
  * <p>{@link #mimeType()} belongs to the path and not to a request, because the
  * reader renders from the mime on its own metadata row: a response claiming a
  * different type would not survive the trip. An endpoint that needs to answer in
- * two formats is two endpoints — {@code report.yaml} beside {@code report.csv} —
+ * two formats is two endpoints — {@code report.yaml} beside {@code report.md} —
  * and not one with a {@code format} parameter that changes what it returns.
+ *
+ * <p>Which is what {@link #renderingOf()} is for. The second of those two
+ * endpoints says whose answer it re-renders, and the served description then
+ * carries <b>one</b> entry for the report with its formats listed, instead of the
+ * same six parameters twice. Without it, two formats of one report read as two
+ * unrelated endpoints that happen to look alike.
  *
  * <p>There are no path variables. Exact paths only, and the omission is
  * deliberate: a variable in the path is where this would stop being a
@@ -57,13 +65,23 @@ import java.util.Set;
  * @param params      every parameter it accepts, in the order they should be
  *                    presented. May be empty: an endpoint without parameters is
  *                    an ordinary file that happens to be computed
+ * @param renderingOf the path of the endpoint whose answer this one renders
+ *                    differently, or {@code null} when it stands on its own. Set
+ *                    it and this endpoint stops having its own entry in the
+ *                    served description and becomes a format under that one —
+ *                    still listed in the tree, still readable, still parameterised
+ *                    in exactly the same way. That last part is enforced: the
+ *                    parameters have to match the endpoint pointed at, because a
+ *                    format described under someone else's parameter list while
+ *                    accepting a different one is a documented lie
  */
 public record EndpointSpec(
         String path,
         String mimeType,
         String title,
         String description,
-        List<EndpointParam> params) {
+        List<EndpointParam> params,
+        @Nullable String renderingOf) {
 
     public EndpointSpec {
         path = path == null ? "" : path.strip();
@@ -104,18 +122,40 @@ public record EndpointSpec(
                         + "' declares the parameter '" + param.name() + "' twice");
             }
         }
+        renderingOf = renderingOf == null || renderingOf.isBlank() ? null : renderingOf.strip();
+        if (path.equals(renderingOf)) {
+            throw new IllegalArgumentException(
+                    "endpoint '" + path + "' cannot be a rendering of itself");
+        }
     }
 
     /** A parameterless endpoint — a computed file. */
     public static EndpointSpec of(
             String path, String mimeType, String title, String description) {
-        return new EndpointSpec(path, mimeType, title, description, List.of());
+        return new EndpointSpec(path, mimeType, title, description, List.of(), null);
     }
 
     /** The same with parameters. */
     public static EndpointSpec of(String path, String mimeType, String title,
             String description, EndpointParam... params) {
-        return new EndpointSpec(path, mimeType, title, description, List.of(params));
+        return new EndpointSpec(path, mimeType, title, description, List.of(params), null);
+    }
+
+    /**
+     * The same spec, declared as another rendering of {@code path}.
+     *
+     * <p>A wither rather than a sixth argument on the factories: this is the
+     * unusual case, and every call site that does not use it should not have to
+     * pass a null for it.
+     */
+    public EndpointSpec asRenderingOf(String path) {
+        return new EndpointSpec(
+                this.path, mimeType, title, description, params, path);
+    }
+
+    /** Whether this endpoint has an entry of its own in the description. */
+    public boolean standsAlone() {
+        return renderingOf == null;
     }
 
     /** The declaration of {@code name}, or empty when it was not declared. */

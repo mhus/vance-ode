@@ -112,6 +112,7 @@ public class EndpointFileSource implements FileSource {
         this.endpoints = index(endpoints);
         this.folders = foldersOf(this.endpoints.values());
         this.api = new ApiSpecEndpoint(this::describe);
+        checkRenderings(this.endpoints);
         log.info("Jaglan endpoints: {} computed path(s) plus /{} — {}",
                 this.endpoints.size(), API_PATH, this.endpoints.keySet());
     }
@@ -146,6 +147,44 @@ public class EndpointFileSource implements FileSource {
             }
         }
         return byPath;
+    }
+
+    /**
+     * Checks every {@code renderingOf} at construction.
+     *
+     * <p>Two things, both of which would otherwise show up as a description that
+     * quietly disagrees with the endpoints: a rendering of a path nobody serves
+     * would vanish from the description entirely, and a rendering that accepts
+     * different parameters than the entry it appears under would document the
+     * wrong ones for it. There is no sensible runtime handling for either, and a
+     * declaration is written once — so this throws.
+     */
+    private static void checkRenderings(Map<String, MountEndpoint> endpoints) {
+        for (MountEndpoint endpoint : endpoints.values()) {
+            EndpointSpec spec = endpoint.spec();
+            String target = spec.renderingOf();
+            if (target == null) {
+                continue;
+            }
+            MountEndpoint primary = endpoints.get(target);
+            if (primary == null) {
+                throw new IllegalArgumentException("'" + spec.path()
+                        + "' is declared a rendering of '" + target
+                        + "', which no endpoint serves");
+            }
+            if (!primary.spec().standsAlone()) {
+                throw new IllegalArgumentException("'" + spec.path()
+                        + "' is a rendering of '" + target + "', which is itself a rendering "
+                        + "of '" + primary.spec().renderingOf() + "' — formats are one level, "
+                        + "so point at the endpoint that stands alone");
+            }
+            if (!primary.spec().params().equals(spec.params())) {
+                throw new IllegalArgumentException("'" + spec.path()
+                        + "' is a rendering of '" + target + "' and must accept exactly its "
+                        + "parameters: it would be described under that entry's parameter "
+                        + "list, and a format that takes different ones makes it wrong");
+            }
+        }
     }
 
     private static Set<String> foldersOf(Iterable<MountEndpoint> endpoints) {
@@ -356,9 +395,16 @@ public class EndpointFileSource implements FileSource {
      */
     public ApiDescription describe() {
         OdeFileCapabilities caps = capabilities();
+        // One entry per endpoint that stands alone, with its other formats
+        // folded in. A rendering has no entry of its own: it would repeat the
+        // whole parameter list under a second name, and a caller comparing the
+        // two would have to work out that they are one report.
         List<ApiDescription.Endpoint> described = new ArrayList<>(endpoints.size());
         for (MountEndpoint endpoint : endpoints.values()) {
-            described.add(ApiDescription.Endpoint.of(endpoint.spec()));
+            EndpointSpec spec = endpoint.spec();
+            if (spec.standsAlone()) {
+                described.add(ApiDescription.Endpoint.of(spec, renderingsOf(spec.path())));
+            }
         }
         return new ApiDescription(
                 caps.displayName(),
@@ -367,6 +413,17 @@ public class EndpointFileSource implements FileSource {
                 caps.canSearch(),
                 USAGE,
                 described);
+    }
+
+    /** The other formats of {@code path}, in declaration order. */
+    private List<EndpointSpec> renderingsOf(String path) {
+        List<EndpointSpec> renderings = new ArrayList<>(2);
+        for (MountEndpoint endpoint : endpoints.values()) {
+            if (path.equals(endpoint.spec().renderingOf())) {
+                renderings.add(endpoint.spec());
+            }
+        }
+        return renderings;
     }
 
     /**
@@ -388,6 +445,8 @@ public class EndpointFileSource implements FileSource {
                     + "reason — never silently ignored.",
             "A parameterised read appears in no listing and is never cached. "
                     + "The unparameterised path is the only one a directory shows.",
+            "A path under 'alsoAt' is the same answer in another format and takes "
+                    + "the same parameters, which are the ones listed above it.",
             "This document is not itself listed. Its path is fixed: " + API_PATH + ".");
 
     // ── paths ────────────────────────────────────────────────────────

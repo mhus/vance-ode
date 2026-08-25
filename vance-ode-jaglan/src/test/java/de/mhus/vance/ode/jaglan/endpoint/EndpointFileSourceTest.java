@@ -139,6 +139,67 @@ class EndpointFileSourceTest {
                 .isInstanceOf(OdeBadRequestException.class);
     }
 
+    // ── another format of the same answer ────────────────────────────
+
+    @Test
+    void aRendering_isListedAndReadableLikeAnyOtherEndpoint() {
+        EndpointFileSource withMarkdown = withMarkdown();
+
+        assertThat(withMarkdown.list("reports")).extracting(OdeFileEntry::path)
+                .contains("reports/trends.md");
+        assertThat(read(withMarkdown.open("reports/trends.md"))).isEqualTo("# topic");
+    }
+
+    @Test
+    void aRendering_hasNoEntryOfItsOwnButAppearsAsAFormat() {
+        ApiDescription described = withMarkdown().describe();
+
+        assertThat(described.endpoints()).extracting(ApiDescription.Endpoint::path)
+                .containsExactly("reports/trends.yaml", "reports/overview.yaml");
+        assertThat(described.endpoints().get(0).alsoAt())
+                .extracting(ApiDescription.Format::path)
+                .containsExactly("reports/trends.md");
+        assertThat(described.endpoints().get(0).alsoAt().get(0).mime())
+                .isEqualTo("text/markdown");
+    }
+
+    @Test
+    void aRendering_takesTheSameParametersAsWhatItRenders() {
+        InputStream answer = withMarkdown().open("reports/trends.md",
+                new OdeQuery(Map.of("dimension", List.of("source"))));
+
+        assertThat(read(answer)).isEqualTo("# source");
+    }
+
+    @Test
+    void aRenderingOfNothing_isRefusedAtConstruction() {
+        assertThatThrownBy(() -> new EndpointFileSource(inner,
+                        List.of(new MarkdownTrendEndpoint())))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("which no endpoint serves");
+    }
+
+    @Test
+    void aRenderingWithOtherParameters_isRefusedAtConstruction() {
+        assertThatThrownBy(() -> new EndpointFileSource(inner,
+                        List.of(new TrendEndpoint(), new DivergingRenderingEndpoint())))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("must accept exactly its parameters");
+    }
+
+    @Test
+    void aRenderingOfARendering_isRefusedAtConstruction() {
+        assertThatThrownBy(() -> new EndpointFileSource(inner, List.of(new TrendEndpoint(),
+                        new MarkdownTrendEndpoint(), new ChainedRenderingEndpoint())))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("formats are one level");
+    }
+
+    private EndpointFileSource withMarkdown() {
+        return new EndpointFileSource(inner, "A news archive.", List.of(
+                new TrendEndpoint(), new MarkdownTrendEndpoint(), new OverviewEndpoint()));
+    }
+
     // ── reading a computed path ──────────────────────────────────────
 
     @Test
@@ -317,6 +378,59 @@ class EndpointFileSourceTest {
         @Override
         public void handle(CallContext ctx) {
             ctx.reply("dimension: " + ctx.text("dimension"));
+        }
+    }
+
+    /** The same report as Markdown — one entry in the description, two paths. */
+    private static final class MarkdownTrendEndpoint implements MountEndpoint {
+
+        @Override
+        public EndpointSpec spec() {
+            return EndpointSpec.of("reports/trends.md", "text/markdown", "Trends",
+                    "The same report, formatted for reading.",
+                    EndpointParam.select("dimension", List.of("topic", "source"), "topic",
+                            "what to group by"))
+                    .asRenderingOf("reports/trends.yaml");
+        }
+
+        @Override
+        public void handle(CallContext ctx) {
+            ctx.reply("# " + ctx.text("dimension"));
+        }
+    }
+
+    /** A rendering that accepts something else — a documented lie, refused. */
+    private static final class DivergingRenderingEndpoint implements MountEndpoint {
+
+        @Override
+        public EndpointSpec spec() {
+            return EndpointSpec.of("reports/trends.md", "text/markdown", "Trends",
+                    "Claims to be the same report and takes another parameter.",
+                    EndpointParam.optional("limit", ParamType.INTEGER, "20", "how many"))
+                    .asRenderingOf("reports/trends.yaml");
+        }
+
+        @Override
+        public void handle(CallContext ctx) {
+            ctx.reply("# nope");
+        }
+    }
+
+    /** A rendering of a rendering — formats are one level. */
+    private static final class ChainedRenderingEndpoint implements MountEndpoint {
+
+        @Override
+        public EndpointSpec spec() {
+            return EndpointSpec.of("reports/trends.txt", "text/plain", "Trends",
+                    "A rendering of the Markdown rendering.",
+                    EndpointParam.select("dimension", List.of("topic", "source"), "topic",
+                            "what to group by"))
+                    .asRenderingOf("reports/trends.md");
+        }
+
+        @Override
+        public void handle(CallContext ctx) {
+            ctx.reply("nope");
         }
     }
 
