@@ -601,6 +601,115 @@ So `rootDir.resolve(path)` is a safe implementation of `open` — which is the
 implementation the contract invites, and the reason the check is strict about
 separators this end does not itself use.
 
+### Computed views — a path plus a query
+
+One of your paths, given a query string, may be a **computed view of itself**:
+
+```
+_ext/library/reports/loans.yaml               → the defaults
+_ext/library/reports/loans.yaml?at=2026-08    → the same path, another answer
+```
+
+Declare `supportsQuery` and override `open(path, OdeQuery)`. The reader sends no
+query unless you declared it, and the default implementation **throws** rather
+than serving the plain file — which is the rule the whole feature rests on:
+
+**Refusing beats ignoring.** A file served without regard for its parameters is
+not an error anybody can see. It is a report for the wrong window, correct in
+every visible respect except the one that was asked about. If you cannot honour a
+parameter, throw.
+
+Three consequences worth knowing before you build on it:
+
+- **A parameterised read is never cached** — that is the reader's rule, not a
+  hint. Something cacheable takes no parameters and lives at an ordinary path.
+- **A parameterised read appears in no listing.** `list` enumerates what *exists*;
+  a view is something you can *ask for*, and the parameter space is yours and not
+  finite. There is nothing to enumerate, so the declaration is the only way anyone
+  finds out these paths take parameters at all.
+- **A view keeps the mime type its path declared in `stat`.** The reader renders
+  from its own metadata row, so a differing type would not survive the trip. Two
+  formats means two paths.
+
+### The endpoint layer — declared parameters, validated once
+
+`FileSource` already routes a path and carries parameters. What it has no place
+for is the **declaration**: which parameters exist, of what type, which are
+required. Without that, every source hand-parses its own query — and dropping a
+parameter looks like success at every level it passes through.
+
+`de.mhus.vance.ode.jaglan.endpoint` is an **optional, additive** layer over the
+contract above. Nothing in it is required, nothing in the base package knows it
+exists, and a source that serves a holding never needs it.
+
+```java
+@Component
+class LoanReportEndpoint implements MountEndpoint {
+
+    @Override
+    public EndpointSpec spec() {
+        return EndpointSpec.of("reports/loans.yaml", "application/yaml",
+                "Loans", "What was borrowed in a window, most frequent first.",
+                EndpointParam.select("dimension", List.of("topic", "source"),
+                        "topic", "what to group by"),
+                EndpointParam.optional("limit", ParamType.INTEGER, "20", "how many rows"));
+    }
+
+    @Override
+    public void handle(CallContext ctx) {
+        ctx.replyYaml(loans.count(ctx.text("dimension"), ctx.integer("limit", 20)));
+    }
+}
+
+@Bean
+FileSource files(LibraryFileSource holding, List<MountEndpoint> endpoints) {
+    return new EndpointFileSource(holding, "What this mount holds.", endpoints);
+}
+```
+
+`EndpointFileSource` keeps everything the wrapped source did — listings, reads,
+writes, search — and adds the endpoints beside it, with the folders their paths
+imply (`reports` above exists nowhere else, and without it the endpoint would
+answer when addressed and be invisible to anyone browsing).
+
+**Where those paths live is yours.** This module reserves no folder and suggests
+none; the only path it claims is `_api.yaml`. `reports/` here is an example, not
+a convention — pick whatever keeps clear of the holding you serve, since an
+endpoint shadows a wrapped path of the same name (and says so in the log when it
+does).
+
+`CallContext` is the point of the exercise. It validates the whole query against
+the declaration **before** `handle` runs: an undeclared name, a value of the
+wrong type, a choice outside its set or a missing required parameter is a 400
+with a reason. There is no way for an endpoint to read a parameter it did not
+declare, and no way for a caller to send one that quietly does nothing.
+
+Three names cannot be declared — `path`, `kind` and `download`. The first
+addresses the file on the wire; the other two belong to the reader's own URL
+space and are stripped before the query is forwarded. A parameter with one of
+those names would never arrive, and nothing in your process could see why.
+
+There are no annotations, no classpath scan, no path variables and no
+interceptors. A variable in the path is where a declaration turns into a router,
+and a mount that needs one address per instance has a real tree to put them in.
+
+### `_api.yaml` — the mount describes itself
+
+`EndpointFileSource` serves one more path: `_api.yaml` at the mount root, listing
+every endpoint, every parameter and the calling convention in plain sentences.
+
+It exists because parameterised views are findable through no listing, which makes
+the declaration the only discovery channel there is. Serving it as a **file** is
+what makes it usable without a contract change: an agent reads it with the
+ordinary document tools, no new wire method, no new capability field.
+
+It is deliberately **not listed** — it describes the mount rather than belonging
+to it. The reader stats an unlisted mounted path on demand when it is addressed,
+and the row it keeps is derived from the path, so it survives a listing that does
+not mention it and comes back identical on the next read. The path is fixed
+rather than configurable: a discoverable location that must first be discovered
+is not one.
+
 ### The shared secret
 
 Same rule as the other inbound modules — `api-key` empty means no check —

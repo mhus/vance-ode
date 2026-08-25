@@ -56,6 +56,17 @@
             <artifactId>jackson-databind</artifactId>
         </dependency>
 
+        <!--
+            For the endpoint layer: the served API description is YAML, and so is
+            most of what a computed view answers with. A dependency rather than a
+            hand-written emitter because YAML is the one output format where a
+            value nobody quoted becomes a different document instead of an error.
+        -->
+        <dependency>
+            <groupId>tools.jackson.dataformat</groupId>
+            <artifactId>jackson-dataformat-yaml</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
