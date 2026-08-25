@@ -684,10 +684,13 @@ wrong type, a choice outside its set or a missing required parameter is a 400
 with a reason. There is no way for an endpoint to read a parameter it did not
 declare, and no way for a caller to send one that quietly does nothing.
 
-Three names cannot be declared — `path`, `kind` and `download`. The first
-addresses the file on the wire; the other two belong to the reader's own URL
-space and are stripped before the query is forwarded. A parameter with one of
-those names would never arrive, and nothing in your process could see why.
+Six names cannot be declared — `path`, `kind`, `entry`, `mode`, `caption` and
+`download`. The first addresses the file on the wire; the rest are the reader's
+own vocabulary (its reference grammar plus the content endpoint's disposition
+switch) and are stripped before the query is forwarded. A parameter with one of
+those names would never arrive, and nothing in your process could see why. The
+list is refused at declaration time, so you find out while writing the endpoint
+rather than from a read that quietly lost a parameter.
 
 There are no annotations, no classpath scan, no path variables and no
 interceptors. A variable in the path is where a declaration turns into a router,

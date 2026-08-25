@@ -29,12 +29,15 @@ import org.jspecify.annotations.Nullable;
  * refused once, at the place a person can fix it, rather than turning into a
  * refused read for somebody else later.
  *
- * <p><b>Three names are refused outright</b>, and this is the least obvious
- * thing in the class. {@code path} addresses the file on the wire endpoint, and
- * {@code kind} and {@code download} belong to the reader's own URL space — it
- * strips both before forwarding the query. A parameter with one of those names
- * would therefore never arrive, and a required one would make every read fail
- * for a reason nothing in this process can see.
+ * <p><b>Six names are refused outright</b>, and this is the least obvious thing
+ * in the class. {@code path} addresses the file on the wire endpoint;
+ * {@code kind}, {@code entry}, {@code mode} and {@code caption} are the
+ * reader's reference grammar — how to interpret a document, where inside an
+ * application to land, how an embed is drawn — and {@code download} is its
+ * content endpoint's disposition switch. The reader strips all five before
+ * forwarding a query. A parameter with one of those names would therefore never
+ * arrive, and a required one would make every read fail for a reason nothing in
+ * this process can see.
  *
  * @param name         the query-string name
  * @param type         what it accepts
@@ -64,9 +67,15 @@ public record EndpointParam(
      * <p>Kept as a literal rather than shared with the reader: the two ends
      * implement the same contract separately, which is what makes it one. The
      * cost is that a name added to the reader's list has to be added here too,
-     * and the alternative — a shared class — has a worse one.
+     * and it is a real cost rather than a theoretical one — the list grew from
+     * three to six within a day of being written, when the reader's reference
+     * grammar turned out to own {@code entry}, {@code mode} and {@code caption}
+     * as well. Being long is the safe direction: a name refused here that the
+     * reader would have forwarded costs one rename at declaration time, and a
+     * name missing here is a parameter that vanishes in flight.
      */
-    public static final List<String> RESERVED_NAMES = List.of("path", "kind", "download");
+    public static final List<String> RESERVED_NAMES =
+            List.of("path", "kind", "entry", "mode", "caption", "download");
 
     private static final Pattern NAME = Pattern.compile("[a-zA-Z][a-zA-Z0-9_-]*");
 

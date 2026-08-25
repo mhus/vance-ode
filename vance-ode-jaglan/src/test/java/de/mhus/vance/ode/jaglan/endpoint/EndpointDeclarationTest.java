@@ -21,6 +21,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * A declaration is written once, by a developer, and everything downstream trusts
@@ -29,10 +31,25 @@ import org.junit.jupiter.api.Test;
  */
 class EndpointDeclarationTest {
 
-    @Test
-    void param_reservedName_isRefused() {
+    /**
+     * Every one of these is a word the reader keeps for itself and strips before
+     * the query is forwarded, so a parameter of that name would never arrive.
+     * Parameterised rather than one test, because the list is the thing under
+     * test — it has grown once already.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"path", "kind", "entry", "mode", "caption", "download"})
+    void param_reservedName_isRefused(String name) {
         assertThatThrownBy(() -> EndpointParam.optional(
-                        "kind", ParamType.STRING, null, "how to read it"))
+                        name, ParamType.STRING, null, "something"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("reserved");
+    }
+
+    @Test
+    void param_reservedNameInAnyCase_isRefused() {
+        assertThatThrownBy(() -> EndpointParam.optional(
+                        "Kind", ParamType.STRING, null, "how to read it"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("reserved");
     }
