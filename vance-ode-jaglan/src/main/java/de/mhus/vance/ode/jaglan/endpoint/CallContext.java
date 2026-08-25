@@ -61,41 +61,37 @@ import tools.jackson.dataformat.yaml.YAMLWriteFeature;
  */
 public final class CallContext {
 
+    /** The Maven coordinates of the writer {@link #replyYaml} needs. */
+    private static final String YAML_ARTIFACT =
+            "tools.jackson.dataformat:jackson-dataformat-yaml";
+
     /**
-     * Shared, because a mapper is expensive to build and immutable once built.
+     * Whether the YAML writer can be loaded at all.
      *
-     * <p>Configured for a reader rather than for a parser: no {@code ---} at the
-     * top of a file that will be shown in a document viewer, quotes only where
-     * they change the meaning, and list indicators indented under their key.
-     * What this writes is read by people as often as by machines.
+     * <p>Checked by name rather than by referring to the type, and that is the
+     * whole point: this class must remain usable when the writer is absent.
+     * It was not, once — the mapper was a static field of this class, so a
+     * classpath without the writer failed in the static initialiser and took
+     * <em>everything</em> with it: the parameter validation, the byte replies,
+     * the plain-text replies, none of which have anything to do with YAML. The
+     * error a caller saw named a Jackson class and a line number in here, and
+     * every read after the first said only "could not initialise
+     * CallContext".
      *
-     * <p><b>Empty values are left out entirely</b>, which is a decision about
-     * somebody else's document and so worth stating: {@code null} and empty
-     * collections carry nothing, and a key present with no value invites the
-     * reading "this exists and is broken". A field that has to appear even when
-     * unset should be given a value that says so.
-     *
-     * <p>Timestamps go out as ISO-8601 rather than as epoch decimals, for the
-     * same audience: {@code 2026-08-25T08:45:00Z} is a date somebody can check
-     * against the question they asked, and {@code 1.787654E9} is not.
+     * <p>A missing library is now one refusal, from the one method that needs
+     * it, naming the artifact to add.
      */
-    private static final YAMLMapper YAML = YAMLMapper.builder()
-            .disable(DateTimeFeature.WRITE_DATES_AS_TIMESTAMPS)
-            .disable(YAMLWriteFeature.WRITE_DOC_START_MARKER)
-            .enable(YAMLWriteFeature.MINIMIZE_QUOTES)
-            // With MINIMIZE_QUOTES on, this is what keeps "0031" and "20" from
-            // being written bare and read back as numbers. Not cosmetic: codes
-            // with leading zeroes are ordinary values in a news archive, and a
-            // silently retyped one is wrong in a way nothing reports.
-            .enable(YAMLWriteFeature.ALWAYS_QUOTE_NUMBERS_AS_STRINGS)
-            // One line per value. The alternative wraps long text with trailing
-            // backslashes, which is valid YAML and unreadable — and these
-            // documents are read by people and by agents, not only parsed.
-            .disable(YAMLWriteFeature.SPLIT_LINES)
-            .enable(YAMLWriteFeature.INDENT_ARRAYS_WITH_INDICATOR)
-            .changeDefaultPropertyInclusion(
-                    value -> value.withValueInclusion(JsonInclude.Include.NON_EMPTY))
-            .build();
+    private static final boolean YAML_AVAILABLE =
+            canLoad("tools.jackson.dataformat.yaml.YAMLMapper");
+
+    private static boolean canLoad(String className) {
+        try {
+            Class.forName(className, false, CallContext.class.getClassLoader());
+            return true;
+        } catch (ClassNotFoundException | LinkageError e) {
+            return false;
+        }
+    }
 
     private final EndpointSpec spec;
     private final Map<String, List<String>> values;
@@ -248,9 +244,39 @@ public final class CallContext {
      * <p>Here because otherwise every source writes its own serialiser for the
      * same job, and hand-built YAML is the one output format where a value
      * nobody quoted turns into a different document rather than an error.
+     *
+     * <p><b>The only method in this package that needs a YAML writer.</b> An
+     * endpoint answering with {@link #reply(byte[])} or {@link #reply(String)}
+     * works on a classpath without one; this one refuses, and says which
+     * artifact is missing.
+     *
+     * @throws IllegalStateException when the writer is not on the classpath
      */
     public void replyYaml(Object content) {
-        reply(YAML.writeValueAsString(content));
+        if (!YAML_AVAILABLE) {
+            throw new IllegalStateException(missingWriter());
+        }
+        String yaml;
+        try {
+            yaml = Yaml.write(content);
+        } catch (LinkageError e) {
+            // The writer is there and something under it is not — Jackson's YAML
+            // backend needs snakeyaml-engine, and a classpath assembled by hand
+            // can have the one without the other. Caught rather than left to
+            // escape, because a bare NoClassDefFoundError names a class nobody
+            // in this codebase has heard of. The cause is kept.
+            throw new IllegalStateException(missingWriter(), e);
+        }
+        reply(yaml);
+    }
+
+    private String missingWriter() {
+        return "'" + spec.path() + "' answers with YAML, but the writer is not usable on "
+                + "this classpath: it needs " + YAML_ARTIFACT + " and the snakeyaml-engine "
+                + "it depends on. Both are dependencies of this module, so a build that "
+                + "resolves normally has them — a runtime without them is usually a "
+                + "hand-assembled or stale classpath. Add them, or answer with "
+                + "reply(byte[]) instead.";
     }
 
     /**
@@ -289,5 +315,65 @@ public final class CallContext {
 
     private static List<String> declaredNames(EndpointSpec spec) {
         return spec.params().stream().map(EndpointParam::name).toList();
+    }
+
+    /**
+     * The YAML writer, in a holder so that loading it is deferred to the first
+     * document that is actually written as YAML.
+     *
+     * <p>A nested class is initialised on first use of one of its members, and
+     * nothing outside {@link #replyYaml} touches this one. That is what keeps
+     * the rest of the class — the validation, the byte replies — independent of
+     * whether a YAML library is present at all.
+     *
+     * <p>The mapper is shared: expensive to build, immutable once built, and
+     * safe to use from several threads.
+     */
+    private static final class Yaml {
+
+        /**
+         * Configured for a reader rather than for a parser: no {@code ---} at
+         * the top of a file that will be shown in a document viewer, quotes
+         * only where they change the meaning, and list indicators indented
+         * under their key. What this writes is read by people as often as by
+         * machines.
+         *
+         * <p><b>Empty values are left out entirely</b>, which is a decision
+         * about somebody else's document and so worth stating: {@code null} and
+         * empty collections carry nothing, and a key present with no value
+         * invites the reading "this exists and is broken". A field that has to
+         * appear even when unset should be given a value that says so.
+         *
+         * <p>Timestamps go out as ISO-8601 rather than as epoch decimals, for
+         * the same audience: {@code 2026-08-25T08:45:00Z} is a date somebody
+         * can check against the question they asked, and {@code 1.787654E9} is
+         * not.
+         */
+        private static final YAMLMapper MAPPER = YAMLMapper.builder()
+                .disable(DateTimeFeature.WRITE_DATES_AS_TIMESTAMPS)
+                .disable(YAMLWriteFeature.WRITE_DOC_START_MARKER)
+                .enable(YAMLWriteFeature.MINIMIZE_QUOTES)
+                // With MINIMIZE_QUOTES on, this is what keeps "0031" and "20"
+                // from being written bare and read back as numbers. Not
+                // cosmetic: codes with leading zeroes are ordinary values in a
+                // news archive, and a silently retyped one is wrong in a way
+                // nothing reports.
+                .enable(YAMLWriteFeature.ALWAYS_QUOTE_NUMBERS_AS_STRINGS)
+                // One line per value. The alternative wraps long text with
+                // trailing backslashes, which is valid YAML and unreadable —
+                // and these documents are read by people and by agents, not
+                // only parsed.
+                .disable(YAMLWriteFeature.SPLIT_LINES)
+                .enable(YAMLWriteFeature.INDENT_ARRAYS_WITH_INDICATOR)
+                .changeDefaultPropertyInclusion(
+                        value -> value.withValueInclusion(JsonInclude.Include.NON_EMPTY))
+                .build();
+
+        private Yaml() {
+        }
+
+        static String write(Object content) {
+            return MAPPER.writeValueAsString(content);
+        }
     }
 }
