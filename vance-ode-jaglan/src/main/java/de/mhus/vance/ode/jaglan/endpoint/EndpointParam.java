@@ -73,9 +73,14 @@ public record EndpointParam(
      * as well. Being long is the safe direction: a name refused here that the
      * reader would have forwarded costs one rename at declaration time, and a
      * name missing here is a parameter that vanishes in flight.
+     *
+     * <p>{@code token} is the one entry that is not grammar but credentials:
+     * the reader's content route authenticates a browser with
+     * {@code ?token=<jwt>}, and a source that declared a {@code token}
+     * parameter would be asking to be handed the caller's session.
      */
     public static final List<String> RESERVED_NAMES =
-            List.of("path", "kind", "entry", "mode", "caption", "download");
+            List.of("path", "kind", "entry", "mode", "caption", "download", "token");
 
     private static final Pattern NAME = Pattern.compile("[a-zA-Z][a-zA-Z0-9_-]*");
 

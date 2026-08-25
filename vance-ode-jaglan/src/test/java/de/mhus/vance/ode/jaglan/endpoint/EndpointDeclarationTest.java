@@ -38,7 +38,7 @@ class EndpointDeclarationTest {
      * test — it has grown once already.
      */
     @ParameterizedTest
-    @ValueSource(strings = {"path", "kind", "entry", "mode", "caption", "download"})
+    @ValueSource(strings = {"path", "kind", "entry", "mode", "caption", "download", "token"})
     void param_reservedName_isRefused(String name) {
         assertThatThrownBy(() -> EndpointParam.optional(
                         name, ParamType.STRING, null, "something"))
