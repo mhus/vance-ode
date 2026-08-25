@@ -67,6 +67,42 @@ public interface KitSource {
      * in a file and list that file under {@code render:} in {@code kit.yaml};
      * the reader fills it in. Substituting here would work for exactly this
      * caller and silently produce a kit tied to it.
+     *
+     * <h2>Shipping a credential</h2>
+     * A file at {@code settings/<key>.yaml} becomes a project setting on the
+     * reader. To hand over an API key of this application, write it as an
+     * encrypted type and say that the value is the credential itself:
+     *
+     * <pre>{@code
+     * type: PASSWORD
+     * encoding: plain
+     * value: "sk-live-abc"
+     * description: "..."
+     * }</pre>
+     *
+     * <p><b>{@code encoding: plain} is what makes this work, and it is
+     * accepted only from an Ode source.</b> Without the line the reader
+     * expects {@code value} to be a vault blob and asks for a password to
+     * open it — which nobody can supply, because provisioning runs with no
+     * one watching. The result is not an error but an absent setting, and the
+     * first symptom is an opaque 401 from whatever the kit configured. That
+     * exception exists because an Ode bundle is built per request and handed
+     * to an authenticated caller over TLS: there is no stored copy for a
+     * vault password to protect.
+     *
+     * <p>Two consequences worth designing around. <b>A delivered credential
+     * is written once</b>, when the project has none, and never touched
+     * again — an install that reset a key somebody rotated would be an
+     * outage. And <b>an unset key belongs omitted, not shipped empty</b>: an
+     * empty value installs a permanent blank that no later configuration
+     * corrects, because of the rule just stated.
+     *
+     * <p>A configuration document should <em>reference</em> the setting
+     * ({@code {{secret:<key>}}}) rather than carry the value: documents are
+     * readable by anyone with project READ, appear over WebDAV and travel in
+     * an export. Note that a file listed under {@code render:} is run through
+     * a template engine first, where {@code {{secret:…}}} is a syntax error —
+     * wrap it in {@code {% verbatim %}}.
      */
     OdeKitBundle build(OdeKitBuildRequest request);
 }
