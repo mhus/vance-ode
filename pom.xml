@@ -4,7 +4,7 @@
 
     <groupId>de.mhus.vance.ode</groupId>
     <artifactId>vance-ode</artifactId>
-    <version>0.2.0-SNAPSHOT</version>
+    <version>0.2.0</version>
     <name>vance-ode</name>
     <description>Spring Boot library that connects foreign software to Vancetope. One module per Vancetope subsystem the application takes part in — a consumer depends on the contracts it uses and inherits nothing else.</description>
     <url>https://github.com/mhus/vance-ode</url>
