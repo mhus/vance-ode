@@ -1,0 +1,30 @@
+# Dependabot configuration — https://docs.github.com/code-security/dependabot
+#
+# Weekly cadence; minor + patch updates are grouped into one PR, major
+# updates arrive individually so they can be reviewed on their own.
+#
+# Ode has no vance parent and manages its own versions (Spring Boot, Lombok,
+# JSpecify, publishing plugins), so it would otherwise drift from vance
+# unnoticed. Spring Boot is meant to track vance's — keep the two in step.
+
+version: 2
+updates:
+  - package-ecosystem: "maven"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "java"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    groups:
+      maven-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
