@@ -62,8 +62,8 @@
             Nothing here needs a newer language level.
         -->
         <maven.compiler.release>21</maven.compiler.release>
-        <spring.boot.version>4.1.0</spring.boot.version>
-        <lombok.version>1.18.46</lombok.version>
+        <spring.boot.version>4.1.1</spring.boot.version>
+        <lombok.version>1.18.48</lombok.version>
         <jspecify.version>1.0.1</jspecify.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
@@ -172,7 +172,7 @@
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-source-plugin</artifactId>
-                        <version>3.3.1</version>
+                        <version>3.4.0</version>
                         <executions>
                             <execution>
                                 <id>attach-sources</id>
@@ -185,7 +185,7 @@
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-javadoc-plugin</artifactId>
-                        <version>3.10.1</version>
+                        <version>3.12.0</version>
                         <configuration>
                             <!--
                                 Central requires the javadoc jar to exist, not
@@ -208,7 +208,7 @@
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-gpg-plugin</artifactId>
-                        <version>3.2.7</version>
+                        <version>3.2.8</version>
                         <executions>
                             <execution>
                                 <id>sign-artifacts</id>
@@ -236,7 +236,7 @@
                     <plugin>
                         <groupId>org.sonatype.central</groupId>
                         <artifactId>central-publishing-maven-plugin</artifactId>
-                        <version>0.8.0</version>
+                        <version>0.11.0</version>
                         <extensions>true</extensions>
                         <configuration>
                             <publishingServerId>central</publishingServerId>
