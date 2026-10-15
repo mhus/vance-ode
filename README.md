@@ -916,13 +916,13 @@ them and has a different job:
 
 | Repo | Licence | Why |
 |---|---|---|
-| `vance` | Business Source License 1.1 | the product; protected |
+| `vance` | GNU AGPLv3 | the product; strong copyleft |
 | `vance-ode` | **Apache-2.0** | meant to be embedded in software we do not own |
 | `hrafnagud` | GPLv3 | a consumer |
 
-BSL 1.1 is not an open-source licence and is not GPL-compatible, so an
-Ode under BSL could not legally be linked into `hrafnagud`. Copyleft
-would have solved that but caused its own trouble: LGPL's
+AGPLv3 is strong copyleft: an Ode under it would pull every application
+that embeds it under the AGPL, too. A weaker copyleft would have avoided
+that but caused its own trouble: LGPL's
 replace-the-library requirement is written for shared objects and fits
 badly with a Spring Boot executable jar, and where an API boundary ends
 in Java — implementing an SPI, inheriting auto-configuration — is
@@ -932,5 +932,5 @@ this library wants.
 Apache-2.0 also carries an explicit patent grant, which MIT does not.
 
 Nothing is given away by this: Ode contains no brain code, only contracts
-and transport. The value stays where it is protected, and the glue is
-free — the usual arrangement for a commercial product's client SDK.
+and transport. The product stays copyleft, and the glue is free — the
+usual arrangement for a client SDK.
