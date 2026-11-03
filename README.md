@@ -934,3 +934,5 @@ Apache-2.0 also carries an explicit patent grant, which MIT does not.
 Nothing is given away by this: Ode contains no brain code, only contracts
 and transport. The product stays copyleft, and the glue is free — the
 usual arrangement for a client SDK.
+
+Contributions are accepted under the [Developer Certificate of Origin](CONTRIBUTING.md): sign off your commits with `git commit -s`.
